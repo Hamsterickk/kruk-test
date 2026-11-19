@@ -326,7 +326,8 @@ loaders.home = async () => {
 
 function leadButton(r, after) {
   const mine = r.lead && me && r.lead.id === me.id;
-  if (r.lead && !mine) return document.createElement('span');
+  // админ занятия не берёт: его нигде не должно быть видно
+  if ((r.lead && !mine) || (me && me.role === 'admin' && !mine)) return document.createElement('span');
   const b = document.createElement('button');
   b.className = `btn-small${mine ? '' : ' accent'}`;
   b.textContent = mine ? 'Отказаться' : 'Беру';
@@ -825,6 +826,18 @@ loaders.trainer = async () => {
 };
 
 document.getElementById('athleteSearch').addEventListener('input', renderAthletes);
+
+// Ссылки одноразовые: пока открыта вкладка «Тренер», раз в 10 секунд подтягиваем свежие,
+// чтобы не скопировать уже использованную
+async function refreshLinks() {
+  if (!document.getElementById('screen-trainer').classList.contains('active') || document.hidden) return;
+  const d = await api('/api/trainer/links');
+  if (!d) return;
+  document.getElementById('athleteLink').textContent = d.athlete_link;
+  if (d.trainer_link) document.getElementById('trainerLink').textContent = d.trainer_link;
+}
+setInterval(refreshLinks, 10000);
+document.addEventListener('visibilitychange', refreshLinks);
 
 function ago(iso) {
   if (!iso) return 'не заходил';

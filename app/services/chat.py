@@ -140,6 +140,8 @@ def callback(user, data: str) -> str:
         from app.services import reminders
         group_id, day = rest.split(':')
         grp = Group.query.filter_by(id=int(group_id), club_id=user.club_id).first()
+        if user.role == 'admin':
+            return 'Админ занятия не ведёт – так тебя никто не видит'
         if not user.is_trainer or not grp:
             return 'Это кнопка для тренеров'
         day = date.fromisoformat(day)

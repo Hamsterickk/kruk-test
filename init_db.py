@@ -3,7 +3,7 @@
 from sqlalchemy import text
 
 from app import create_app
-from app.models import db, User, Membership, Food, Pending, ATHLETE
+from app.models import db, User, Membership, Food, Pending, SessionLead, ATHLETE
 from app.services.club import seed_kruk_team
 from app.services.foods import seed_starter_foods
 from app.services import profile
@@ -38,6 +38,10 @@ with app.app_context():
     for f in junk:
         db.session.delete(f)
     Pending.query.delete()
+    # админ невидим: занятия, которые он успел взять, снова свободны
+    admins = [u.id for u in User.query.filter_by(role='admin').all()]
+    if admins:
+        SessionLead.query.filter(SessionLead.trainer_id.in_(admins)).delete(synchronize_session=False)
     db.session.commit()
     username = app.config['BOT_USERNAME']
     print(f'Таблицы готовы. Новых продуктов в стартовой базе: {added}. Убрано мусора из баз: {len(junk)}')

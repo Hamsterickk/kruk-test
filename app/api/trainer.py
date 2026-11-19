@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from flask import Blueprint, jsonify, request, g, current_app
 
 from app.auth import trainer_required
-from app.models import db, User, Club, Group, Location, Membership, SessionCancel, Goal, ADMIN, ATHLETE
+from app.models import db, User, Club, Group, Location, Membership, SessionCancel, Goal, ADMIN, ATHLETE, TRAINER
 from app.services import club, goals, body, foods, reminders, avatars
 
 bp = Blueprint('trainer', __name__)
@@ -43,17 +43,27 @@ def overview():
                          'groups': [x.name for x in club.user_groups(u.id)], 'attendance': stats['percent'],
                          'weight': s['weight'], 'weight_change': s['weight_change'],
                          'last_seen': u.last_seen_at.isoformat() if u.last_seen_at else None})
-    pending = [{'id': u.id, 'name': u.name or u.username or str(u.tg_id)} for u in people if u.onboarding_step is not None]
+    pending = [{'id': u.id, 'name': u.name or u.username or str(u.tg_id)} for u in people
+               if u.onboarding_step is not None and u.role != ADMIN]
     groups = Group.query.filter_by(club_id=c.id, is_active=True).order_by(Group.location_id, Group.start_time).all()
     return jsonify({
         'club': c.name, 'athlete_link': _link(c.join_code),
         'trainer_link': _link(c.trainer_code) if g.user.role == ADMIN else None,
         'athletes': athletes, 'registering': pending, 'me': g.user.id,
-        'trainers': [{'id': u.id, 'name': u.name, 'avatar': avatars.url(u)} for u in people if u.role != ATHLETE],
+        'trainers': [{'id': u.id, 'name': u.name, 'avatar': avatars.url(u)} for u in people if u.role == TRAINER],
         'groups': [{**club.group_json(x), 'members': len(club.group_members(x.id))} for x in groups],
         'locations': [{'id': l.id, 'name': l.name, 'address': l.address}
                       for l in Location.query.filter_by(club_id=c.id).order_by(Location.id).all()],
     })
+
+
+@bp.route('/links')
+@trainer_required
+def links():
+    """Свежие ссылки: после каждого входа по ссылке она меняется."""
+    c = db.session.get(Club, g.user.club_id)
+    return jsonify({'athlete_link': _link(c.join_code),
+                    'trainer_link': _link(c.trainer_code) if g.user.role == ADMIN else None})
 
 
 @bp.route('/athlete/<int:user_id>')
@@ -235,6 +245,8 @@ def group_lead(group_id):
     if not grp or not day or day.weekday() not in grp.days or day < date.today():
         return jsonify({'error': 'Такого занятия нет'}), 400
     if data.get('take', True):
+        if g.user.role == ADMIN:
+            return jsonify({'error': 'Админ занятия не ведёт – так тебя никто не видит'}), 403
         ok, who = club.take_lead(grp.id, day, g.user.id)
         if not ok:
             return jsonify({'error': f'Уже ведёт {who}'}), 409

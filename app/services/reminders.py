@@ -111,7 +111,7 @@ def _user_tick(user: User, now: datetime) -> int:
                 g = s['group']
                 kb = buttons([[('💪 Был', f"att:{g.id}:{today}:1"), ('Не был', f"att:{g.id}:{today}:0")]])
                 sent += send(user.tg_id, f"Как тренировка – {g.name}, {g.start_time}? Отметь:", kb)
-    if user.is_trainer and user.club_id:
+    if user.role == 'trainer' and user.club_id:  # админ тренерских уведомлений не получает
         sent += _trainer_tick(user, now)
     # итог дня
     evening = datetime.combine(today, datetime.min.time()).replace(hour=EVENING_AT[0], minute=EVENING_AT[1])
@@ -152,7 +152,7 @@ def _trainer_tick(user: User, now: datetime) -> int:
 
 def _trainers(club_id: int, except_id: int) -> list[User]:
     return User.query.filter(User.club_id == club_id, User.id != except_id, User.is_active == True,  # noqa: E712
-                             User.role.in_(['trainer', 'admin'])).all()
+                             User.role == 'trainer').all()  # админ невидим – ему не пишем
 
 
 def notify_lead_taken(trainer: User, group, day: date) -> int:

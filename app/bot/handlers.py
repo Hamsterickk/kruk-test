@@ -12,6 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from app.models import db, User, Club, Message, AiUsage, Goal, ATHLETE, TRAINER, ADMIN
 from app.services import chat, profile, goals, reminders, club
 from app.services.tg import md_to_html, send
+from app.services.club import new_code
 
 logger = logging.getLogger(__name__)
 INVITE_ONLY = ('Это тестовый бот клуба Kruk Team. Вход только по приглашению – попроси ссылку у тренера.')
@@ -88,9 +89,19 @@ def notify_trainers_new(user_id: int):
     u = db.session.get(User, user_id)
     if u.role != ATHLETE:
         return
-    trainers = User.query.filter(User.club_id == u.club_id, User.role.in_([TRAINER, ADMIN]), User.is_active == True).all()  # noqa: E712
+    trainers = User.query.filter(User.club_id == u.club_id, User.role == TRAINER, User.is_active == True).all()  # noqa: E712
     for t in trainers:
         send(t.tg_id, f"👋 Новый спортсмен: {u.name}. Поставь ему группы в приложении, вкладка «Тренер».")
+
+
+def use_code(club, code: str | None):
+    """Ссылка одноразовая: по ней вошли – выдаём клубу новую, старая больше не пускает."""
+    if not club or not code:
+        return
+    if club.join_code == code:
+        club.join_code = new_code()
+    elif club.trainer_code == code:
+        club.trainer_code = new_code()
 
 
 def register(tg_id: int, first_name: str, username: str | None, code: str | None) -> dict:
@@ -109,10 +120,15 @@ def register(tg_id: int, first_name: str, username: str | None, code: str | None
         club = club or Club.query.order_by(Club.id).first()
         role = ADMIN
     if user:
+        changed = False
         if club and (not user.is_active or user.club_id != club.id):
             user.is_active, user.club_id = True, club.id
-        if role and (role == ADMIN or (role == TRAINER and user.role == ATHLETE)):
+            changed = True
+        if role and user.role != role and (role == ADMIN or (role == TRAINER and user.role == ATHLETE)):
             user.role = role
+            changed = True
+        if changed:
+            use_code(club, code)
         db.session.commit()
         if not user.is_active:
             return {'status': 'inactive', 'user_id': user.id}
@@ -122,6 +138,7 @@ def register(tg_id: int, first_name: str, username: str | None, code: str | None
     user = User(tg_id=tg_id, club_id=club.id, role=role, name=(first_name or '')[:40] or None,
                 username=username, onboarding_step='name')
     db.session.add(user)
+    use_code(club, code)
     db.session.commit()
     return {'status': 'new', 'user_id': user.id}
 
