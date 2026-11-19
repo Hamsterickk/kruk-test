@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/400.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/600.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/700.css">
-  <link rel="stylesheet" href="style.css?v=1">
+  <link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
   <div id="gate" class="gate hidden">
@@ -37,7 +37,7 @@
       </div>
 
       <div class="widget">
-        <div class="widget-row"><h3>Тренировки</h3><span class="muted small" id="homeWeek"></span></div>
+        <div class="widget-row"><h3 id="homeSessionsTitle">Тренировки</h3><span class="muted small" id="homeWeek"></span></div>
         <div id="homeSessions"></div>
       </div>
 
@@ -45,10 +45,10 @@
         <div class="widget-row"><h3>Цели дня</h3><span class="muted small" id="homeGoalsCount"></span></div>
         <div id="homeGoals"></div>
         <div class="inline-form">
-          <input type="text" id="goalInput" placeholder="Новая цель, например «2 литра воды»" maxlength="200">
+          <input type="text" id="goalInput" placeholder="Новая цель" maxlength="200">
           <button class="btn-plus" id="goalAddBtn" aria-label="Добавить цель">+</button>
         </div>
-        <label class="switch-row"><input type="checkbox" id="goalDaily" checked> <span>Каждый день</span></label>
+        <div class="seg" id="goalDaily"><button type="button" data-v="1" class="active">Каждый день</button><button type="button" data-v="0">Только сегодня</button></div>
       </div>
 
       <div class="widget tap" id="homeBody">
@@ -82,7 +82,7 @@
       </div>
 
       <div class="widget">
-        <div class="widget-row"><h3>Записано</h3><span class="muted small">тап по весу – поправить</span></div>
+        <h3>Записано</h3>
         <div id="mealsList"></div>
       </div>
 
@@ -93,15 +93,15 @@
         <div id="baseBody" class="hidden">
           <div id="baseForm" class="base-form hidden">
             <input type="text" id="baseName" placeholder="Название" maxlength="120">
+            <div class="form-label">КБЖУ на 100 г</div>
             <div class="grid4">
               <input type="number" id="baseKcal" placeholder="ккал" inputmode="decimal">
               <input type="number" id="baseP" placeholder="Б" inputmode="decimal">
               <input type="number" id="baseF" placeholder="Ж" inputmode="decimal">
               <input type="number" id="baseC" placeholder="У" inputmode="decimal">
             </div>
-            <input type="number" id="basePortion" placeholder="Обычная порция, г – необязательно" inputmode="decimal">
-            <button class="btn btn-accent" id="baseSaveBtn">Сохранить в базу</button>
-            <div class="hint">КБЖУ на 100 г – смотри на упаковке</div>
+            <input type="number" id="basePortion" placeholder="Порция, г" inputmode="decimal">
+            <button class="btn btn-accent" id="baseSaveBtn">Сохранить</button>
           </div>
           <div id="baseList"></div>
         </div>
@@ -120,8 +120,7 @@
       <div class="widget"><div class="widget-row"><h3>Шаги</h3><span class="muted small" id="stepsNote"></span></div><div class="bars" id="stepsBars"></div></div>
 
       <div class="widget">
-        <h3 id="bodyFormTitle">Записать за сегодня</h3>
-        <div class="hint">Тап по дню на графике – записать или поправить задним числом</div>
+        <div class="widget-row"><h3 id="bodyFormTitle">Сегодня</h3><span class="muted small">тап по дню – другой день</span></div>
         <div class="grid3">
           <input type="number" id="inWeight" placeholder="Вес" inputmode="decimal">
           <input type="number" id="inSleep" placeholder="Сон" inputmode="decimal">
@@ -174,12 +173,12 @@
     <!-- ТРЕНЕР -->
     <section id="screen-trainer" class="screen">
       <div class="widget">
-        <h3>Пригласить в клуб</h3>
+        <h3>Приглашения</h3>
+        <div class="form-label">Спортсменам</div>
         <div class="link-row"><span class="link-text" id="athleteLink"></span><button class="icon-btn" id="copyAthleteLink" aria-label="Скопировать"></button></div>
-        <div class="hint">Отправь эту ссылку спортсмену. Детей не добавляем.</div>
         <div id="trainerLinkBox" class="hidden">
+          <div class="form-label">Тренерам</div>
           <div class="link-row"><span class="link-text" id="trainerLink"></span><button class="icon-btn" id="copyTrainerLink" aria-label="Скопировать"></button></div>
-          <div class="hint">Ссылка для тренеров – видишь только ты</div>
         </div>
       </div>
 
@@ -188,6 +187,7 @@
         <input type="text" id="athleteSearch" placeholder="Поиск по имени">
         <div id="athleteList"></div>
         <div id="registeringBox" class="hint hidden"></div>
+        <div id="trainersBox" class="hint hidden"></div>
       </div>
 
       <div class="widget">
@@ -238,6 +238,6 @@
     </div>
   </div>
   <div id="toast"></div>
-  <script src="main.js?v=1"></script>
+  <script src="main.js?v=2"></script>
 </body>
 </html>

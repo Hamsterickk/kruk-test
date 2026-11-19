@@ -82,22 +82,38 @@ def today():
     upcoming = [s for s in club.sessions(groups, date.today(), date.today() + timedelta(days=6))
                 if club.session_end(s) > datetime.now()][:4]
     att = club.attendance_map(u.id, date.today(), date.today())
+    rs = club.rsvp_map(u.id, date.today(), date.today() + timedelta(days=6))
     return jsonify({
         'food': t, 'kcal_target': u.kcal_target, 'protein_target': u.protein_target,
         'weight': m.weight, 'sleep': m.sleep, 'steps': m.steps,
         'goals': goals.as_json(u.id),
-        'sessions': [_session_json(s, att) for s in upcoming],
+        'sessions': [_session_json(s, att, rs) for s in upcoming],
         'week': dict(zip(('present', 'total'), club.week_count(u.id))),
+        'club_sessions': _trainer_sessions(u) if u.is_trainer else None,
     })
 
 
-def _session_json(s, att=None):
+def _trainer_sessions(u):
+    """Тренеру на главной – занятия клуба сегодня и завтра: кто ведёт, сколько придёт."""
+    out = []
+    for s in club.club_sessions(u.club_id, date.today(), date.today() + timedelta(days=1)):
+        if club.session_end(s) <= datetime.now():
+            continue
+        r = club.roster(s['group'], s['date'])
+        r.update({'group': s['group'].name, 'location': club.group_json(s['group'])['location'],
+                  'members_count': len(r.pop('members'))})
+        out.append(r)
+    return out
+
+
+def _session_json(s, att=None, rs=None):
     a = (att or {}).get((s['group'].id, s['date']))
     return {'group_id': s['group'].id, 'group': s['group'].name, 'date': s['date'].isoformat(),
             'weekday': club.WD_SHORT[s['date'].weekday()], 'start': s['group'].start_time,
             'end': s['group'].end_time, 'location': club.group_json(s['group'])['location'],
             'address': club.group_json(s['group'])['address'], 'cancelled': s['cancelled'], 'note': s['note'],
-            'present': a.present if a else None, 'started': club.session_start(s) <= datetime.now()}
+            'present': a.present if a else None, 'started': club.session_start(s) <= datetime.now(),
+            'going': (rs or {}).get((s['group'].id, s['date']))}
 
 
 # ===== ЕДА =====
@@ -307,8 +323,9 @@ def club_my():
     start = date.today()
     sess = [s for s in club.sessions(groups, start, start + timedelta(days=7)) if club.session_end(s) > datetime.now()]
     att = club.attendance_map(u.id, start, start)
+    rs = club.rsvp_map(u.id, start, start + timedelta(days=7))
     return jsonify({'groups': [club.group_json(x) for x in groups],
-                    'upcoming': [_session_json(s, att) for s in sess],
+                    'upcoming': [_session_json(s, att, rs) for s in sess],
                     'history': club.history(u.id, 30), 'stats': club.attendance_stats(u.id, 30)})
 
 
@@ -328,6 +345,23 @@ def club_attendance():
     present = data.get('present') if 'present' in data else (existing.present if existing else True)
     club.set_attendance(g.user.id, group_id, day, present, 'self' if not existing or existing.set_by == 'self' else 'trainer',
                         data.get('note') if 'note' in data else None)
+    return jsonify({'ok': True})
+
+
+@bp.route('/club/rsvp', methods=['POST'])
+@user_required
+def club_rsvp():
+    data = request.json or {}
+    try:
+        day = date.fromisoformat(str(data.get('date')))
+    except ValueError:
+        day = None
+    group_id = int(data.get('group_id') or 0)
+    grp = db.session.get(club.Group, group_id)
+    if not day or not grp or group_id not in [x.id for x in club.user_groups(g.user.id)] or day < date.today() \
+            or day.weekday() not in grp.days:
+        return jsonify({'error': 'Такого занятия у тебя нет'}), 400
+    club.set_rsvp(g.user.id, group_id, day, bool(data.get('going')))
     return jsonify({'ok': True})
 
 

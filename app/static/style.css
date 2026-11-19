@@ -50,7 +50,8 @@ h3 { font-size: 0.76rem; color: var(--head); font-weight: 700; text-transform: u
 
 /* приветствие */
 .hello { display: flex; justify-content: space-between; align-items: center; padding: 6px 2px 12px; }
-.hello-name { font-family: "Bebas Neue", "Montserrat", sans-serif; font-size: 1.7rem; letter-spacing: .5px; }
+/* Bebas Neue не умеет кириллицу – в именах и заголовках только Montserrat, Bebas остаётся цифрам */
+.hello-name { font-size: 1.35rem; font-weight: 700; letter-spacing: -.2px; }
 .hello-sub { color: var(--text-muted); font-size: 0.8rem; }
 .badge { background: var(--accent-soft); color: var(--accent); border-radius: 999px; padding: 4px 10px; font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; }
 
@@ -194,7 +195,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 50; display: flex; align-items: flex-end; }
 .sheet-box { background: var(--bg-card); border-top: 1px solid var(--border); border-radius: 18px 18px 0 0; width: 100%; max-height: 92vh; overflow-y: auto; padding: 14px 14px calc(24px + env(safe-area-inset-bottom, 0px)); }
 .sheet-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
-.sheet-title { font-family: "Bebas Neue", sans-serif; font-size: 1.6rem; }
+.sheet-title { font-size: 1.25rem; font-weight: 700; }
 .sheet-section { margin-bottom: 18px; }
 .chips.wrap .chip { flex: 1 1 calc(50% - 6px); }
 
@@ -232,6 +233,24 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .gate { position: fixed; inset: 0; background: var(--bg); z-index: 100; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .gate-box { text-align: center; max-width: 320px; }
 .gate-logo { font-family: "Bebas Neue", sans-serif; font-size: 2.4rem; color: var(--accent); letter-spacing: 2px; margin-bottom: 12px; }
+.form-label { font-size: 0.72rem; color: var(--text-muted); margin: 2px 0 6px; }
+
+/* переключатель «каждый день / только сегодня» */
+.seg { display: flex; background: var(--bg); border: 1px solid var(--border); border-radius: 10px; padding: 3px; margin-top: 10px; }
+.seg button { flex: 1; border: none; background: none; color: var(--text-muted); padding: 7px 6px; border-radius: 8px; font-size: 0.8rem; cursor: pointer; }
+.seg button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.small-chip { padding: 5px 11px; font-size: 0.78rem; border-radius: 8px; }
+
+/* группы тренера и состав занятия */
+.group-head { display: flex; align-items: center; gap: 8px; }
+.group-main { flex: 1; min-width: 0; }
+.roster { padding: 10px 2px 6px; border-bottom: 1px solid var(--border); }
+.roster:last-child { border-bottom: none; }
+.roster.cancelled { opacity: .6; }
+.roster-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; margin-bottom: 6px; font-size: 0.88rem; }
+.roster-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.member { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; font-size: 0.86rem; }
+.member .chips { flex-wrap: nowrap; }
 .gate-box p { color: var(--text-muted); line-height: 1.5; font-size: 0.92rem; }
 
 /* подтверждение и уведомления */
@@ -246,3 +265,4 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
   font-size: 0.84rem; z-index: 300; transition: transform .25s; max-width: calc(100% - 32px); text-align: center;
 }
 #toast.show { transform: translate(-50%, 0); }
+.session > .btn-small { align-self: center; }

@@ -46,6 +46,14 @@ const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,
 const ddmm = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 const wdOf = (iso) => WD[(new Date(`${iso}T12:00:00`).getDay() + 6) % 7];
 
+// Переключатель из двух кнопок вместо галочки
+function segInit(el) {
+  el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+    el.querySelectorAll('button').forEach((x) => x.classList.toggle('active', x === b));
+  }));
+}
+const segValue = (el) => el.querySelector('button.active').dataset.v === '1';
+
 function toast(text) {
   const t = document.getElementById('toast');
   t.textContent = text;
@@ -140,7 +148,7 @@ function kcalBlock(prefix, totals, target, proteinTarget) {
     <span><b>${totals.fat}</b> жиры</span><span><b>${totals.carbs}</b> углеводы</span>`;
 }
 
-function sessionRow(s, onMark) {
+function sessionRow(s, onMark, rsvpDays = 7) {
   const row = document.createElement('div');
   row.className = `session${s.cancelled ? ' cancelled' : ''}`;
   const today = s.date === isoDay(new Date());
@@ -149,14 +157,16 @@ function sessionRow(s, onMark) {
     <div class="session-time"><b>${esc(s.start)}</b><span>${esc(when)}</span></div>
     <div class="session-info"><div>${esc(s.group)}</div><div class="muted small">${esc(s.location)}${s.address ? ` · ${esc(s.address)}` : ''}</div>
     ${s.cancelled ? `<div class="tag tag-red">Отменено${s.note ? `: ${esc(s.note)}` : ''}</div>` : ''}</div>`;
-  if (onMark && s.started && !s.cancelled) {
+  const soon = (new Date(`${s.date}T00:00:00`) - new Date(isoDay(new Date()) + 'T00:00:00')) / 864e5 < rsvpDays;
+  if (onMark && !s.cancelled && (s.started || soon)) {
     const box = document.createElement('div');
     box.className = 'mark-btns';
-    [['Был', true], ['Не был', false]].forEach(([label, val]) => {
+    const opts = s.started ? [['Был', true, s.present], ['Не был', false, s.present]] : [['Буду', true, s.going], ['Не смогу', false, s.going]];
+    opts.forEach(([label, val, cur]) => {
       const b = document.createElement('button');
-      b.className = `chip${s.present === val ? ' active' : ''}`;
+      b.className = `chip small-chip${cur === val ? ' active' : ''}`;
       b.textContent = label;
-      b.addEventListener('click', () => onMark(s, val));
+      b.addEventListener('click', () => (s.started ? onMark(s, val) : setRsvp(s, val)));
       box.appendChild(b);
     });
     row.querySelector('.session-info').appendChild(box);
@@ -164,14 +174,24 @@ function sessionRow(s, onMark) {
   return row;
 }
 
+async function setRsvp(s, going) {
+  const r = await api('/api/club/rsvp', { json: { group_id: s.group_id, date: s.date, going } });
+  if (r) { toast(going ? 'Записал: будешь' : 'Отметил: не сможешь'); refreshCurrent(); }
+}
+
+function refreshCurrent() {
+  const active = document.querySelector('.nav-btn.active');
+  if (active && loaders[active.dataset.screen]) loaders[active.dataset.screen]();
+}
+
 async function markAttendance(s, present) {
   const r = await api('/api/club/attendance', { json: { group_id: s.group_id, date: s.date, present } });
-  if (r) { toast(present ? 'Отметил: был 💪' : 'Отметил: не был'); loaders.home(); }
+  if (r) { toast(present ? 'Отметил: был 💪' : 'Отметил: не был'); refreshCurrent(); }
 }
 
 function renderGoals(container, list, onToggle, onDelete, allowAll = false) {
   container.innerHTML = '';
-  if (!list.length) { container.innerHTML = '<div class="empty">Целей пока нет – добавь ниже</div>'; return; }
+  if (!list.length) { container.innerHTML = '<div class="empty">Целей нет</div>'; return; }
   list.forEach((g) => {
     const row = document.createElement('div');
     row.className = `check-row${g.done ? ' done' : ''}`;
@@ -195,9 +215,17 @@ loaders.home = async () => {
   document.getElementById('homeKcalNote').textContent = left === null ? '' : left > 0 ? `осталось ${left}` : `перебор ${-left}`;
   const sess = document.getElementById('homeSessions');
   sess.innerHTML = '';
-  if (!d.sessions.length) sess.innerHTML = '<div class="empty">Тренер ещё не поставил тебе группы</div>';
-  d.sessions.forEach((s) => sess.appendChild(sessionRow(s, markAttendance)));
-  document.getElementById('homeWeek').textContent = d.week.total ? `на неделе ${d.week.present} из ${d.week.total}` : '';
+  if (d.club_sessions) {
+    document.getElementById('homeSessionsTitle').textContent = 'Тренировки клуба';
+    document.getElementById('homeWeek').textContent = 'сегодня и завтра';
+    if (!d.club_sessions.length) sess.innerHTML = '<div class="empty">Занятий нет</div>';
+    d.club_sessions.forEach((r) => sess.appendChild(clubSessionRow(r)));
+  } else {
+    if (!d.sessions.length) sess.innerHTML = '<div class="empty">Тренер ещё не поставил тебе группы</div>';
+    // на главной «буду / не смогу» только на сегодня и завтра, остальное – во вкладке «Клуб»
+    d.sessions.slice(0, 3).forEach((s) => sess.appendChild(sessionRow(s, markAttendance, 2)));
+    document.getElementById('homeWeek').textContent = d.week.total ? `на неделе ${d.week.present} из ${d.week.total}` : '';
+  }
   const done = d.goals.filter((g) => g.done).length;
   document.getElementById('homeGoalsCount').textContent = d.goals.length ? `${done} из ${d.goals.length}` : '';
   renderGoals(document.getElementById('homeGoals'), d.goals, async (g) => {
@@ -211,13 +239,41 @@ loaders.home = async () => {
   document.getElementById('homeSteps').textContent = d.steps ?? '–';
 };
 
+// Занятие клуба глазами тренера: кто ведёт, сколько придёт, кнопка «Беру»
+function clubSessionRow(r) {
+  const row = document.createElement('div');
+  row.className = `session${r.cancelled ? ' cancelled' : ''}`;
+  const when = r.date === isoDay(new Date()) ? 'Сегодня' : `${r.weekday} ${ddmm(r.date)}`;
+  const lead = r.lead ? `Ведёт ${esc(r.lead.name)}` : '<span class="warn">Никто не взял</span>';
+  row.innerHTML = `<div class="session-time"><b>${esc(r.start)}</b><span>${esc(when)}</span></div>
+    <div class="session-info"><div>${esc(r.group)}</div>
+    <div class="muted small">${esc(r.location)} · ${r.cancelled ? 'отменено' : `${lead} · будут ${r.going} из ${r.members_count}`}</div></div>`;
+  if (!r.cancelled) row.appendChild(leadButton(r, () => refreshCurrent()));
+  return row;
+}
+
+function leadButton(r, after) {
+  const mine = r.lead && me && r.lead.id === me.id;
+  if (r.lead && !mine) return document.createElement('span');
+  const b = document.createElement('button');
+  b.className = `btn-small${mine ? '' : ' accent'}`;
+  b.textContent = mine ? 'Отказаться' : 'Беру';
+  b.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    const res = await api(`/api/trainer/group/${r.group_id}/lead`, { json: { date: r.date, take: !mine } });
+    if (res) { toast(mine ? 'Снял с себя занятие' : 'Ты ведёшь. Тренерам написал'); after(); }
+  });
+  return b;
+}
+
 async function addGoal() {
   const input = document.getElementById('goalInput');
   const title = input.value.trim();
   if (!title) return;
-  const r = await api('/api/goals', { json: { title, daily: document.getElementById('goalDaily').checked } });
+  const r = await api('/api/goals', { json: { title, daily: segValue(document.getElementById('goalDaily')) } });
   if (r) { input.value = ''; loaders.home(); }
 }
+segInit(document.getElementById('goalDaily'));
 document.getElementById('goalAddBtn').addEventListener('click', addGoal);
 document.getElementById('goalInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') addGoal(); });
 
@@ -411,7 +467,7 @@ function bars(containerId, days, key, opts) {
 
 function selectBodyDay(d) {
   bodyDay = d.date === isoDay(new Date()) ? null : d.date;
-  document.getElementById('bodyFormTitle').textContent = bodyDay ? `Записать за ${wdOf(d.date)} ${ddmm(d.date)}` : 'Записать за сегодня';
+  document.getElementById('bodyFormTitle').textContent = bodyDay ? `${wdOf(d.date)} ${ddmm(d.date)}` : 'Сегодня';
   document.getElementById('inWeight').value = d.weight ?? '';
   document.getElementById('inSleep').value = d.sleep ?? '';
   document.getElementById('inSteps').value = d.steps ?? '';
@@ -452,7 +508,7 @@ document.getElementById('bodySaveBtn').addEventListener('click', async () => {
   if (!r) return;
   toast(bodyDay ? `Записал за ${ddmm(bodyDay)}` : 'Записал');
   bodyDay = null;
-  document.getElementById('bodyFormTitle').textContent = 'Записать за сегодня';
+  document.getElementById('bodyFormTitle').textContent = 'Сегодня';
   loaders.body();
 });
 
@@ -463,8 +519,8 @@ async function loadProfile() {
   me = await api('/api/me');
   if (!me) return;
   document.getElementById('normText').textContent = me.kcal_target
-    ? `Норма: ${me.kcal_target} ккал, белок ${me.protein_target} г. Считается по анкете и последнему весу.`
-    : 'Норма появится, когда будут рост, возраст, вес и цель.';
+    ? `Норма ${me.kcal_target} ккал, белок ${me.protein_target} г`
+    : 'Норма появится, когда будут рост, возраст, вес и цель';
   document.getElementById('pGoal').value = me.goal || 'keep';
   morningSel.value = me.morning_hour || 10;
   document.getElementById('pAge').value = me.age ?? '';
@@ -497,7 +553,7 @@ loaders.club = async () => {
   const up = document.getElementById('upcomingList');
   up.innerHTML = '';
   if (!d.upcoming.length) up.innerHTML = '<div class="empty">Ближайших занятий нет</div>';
-  d.upcoming.forEach((s) => up.appendChild(sessionRow(s, async (x, val) => { await markAttendance(x, val); loaders.club(); })));
+  d.upcoming.forEach((s) => up.appendChild(sessionRow(s, markAttendance)));
   const hl = document.getElementById('historyList');
   hl.innerHTML = '';
   if (!d.history.length) hl.innerHTML = '<div class="empty">Здесь появятся прошедшие занятия</div>';
@@ -668,6 +724,9 @@ loaders.trainer = async () => {
   const reg = document.getElementById('registeringBox');
   reg.classList.toggle('hidden', !d.registering.length);
   reg.textContent = d.registering.length ? `Проходят анкету: ${d.registering.map((x) => x.name).join(', ')}` : '';
+  const tb = document.getElementById('trainersBox');
+  tb.classList.toggle('hidden', !d.trainers.length);
+  tb.textContent = `Тренеры: ${d.trainers.map((x) => x.name).join(', ')}`;
   renderGroups();
   const ll = document.getElementById('locList');
   ll.innerHTML = d.locations.map((l) => `<div class="loc-row"><b>${esc(l.name)}</b> <span class="muted small">${esc(l.address || '')}</span></div>`).join('');
@@ -695,8 +754,8 @@ function renderAthletes() {
     const row = document.createElement('div');
     row.className = 'athlete-row tap';
     row.innerHTML = `<div class="avatar">${esc(a.name.slice(0, 1).toUpperCase())}</div>
-      <div class="athlete-main"><div>${esc(a.name)}${a.role !== 'athlete' ? ' <span class="tag">тренер</span>' : ''}</div>
-      <div class="muted small">${a.groups.length ? esc(a.groups.join(', ')) : a.role === 'athlete' ? '<span class="warn">группы не назначены</span>' : 'без групп'}</div>
+      <div class="athlete-main"><div>${esc(a.name)}</div>
+      <div class="muted small">${a.groups.length ? esc(a.groups.join(', ')) : '<span class="warn">группы не назначены</span>'}</div>
       <div class="muted small">${ago(a.last_seen)}${a.attendance !== null ? ` · посещаемость ${a.attendance}%` : ''}${a.weight ? ` · ${fmt(a.weight)} кг` : ''}</div></div>
       <span class="chevron">›</span>`;
     row.addEventListener('click', () => openAthlete(a.id));
@@ -720,19 +779,19 @@ async function openAthlete(id) {
   const body = document.getElementById('sheetBody');
   const s = a.summary;
   body.innerHTML = `
-    <div class="sheet-section"><h3>Группы</h3><div class="chips wrap" id="sgGroups"></div>
-      <div class="hint">Включи группы по его абонементу – бот сразу напишет ему расписание</div></div>
+    <div class="sheet-section"><h3>Группы</h3><div class="chips wrap" id="sgGroups"></div></div>
     <div class="sheet-section"><h3>Показатели</h3><div class="trio">
       <div><span class="trio-num">${fmt(s.weight)}</span><span class="trio-label">вес${s.weight_change ? `, ${s.weight_change > 0 ? '+' : ''}${fmt(s.weight_change)} за нед.` : ''}</span></div>
       <div><span class="trio-num">${fmt(s.sleep_avg)}</span><span class="trio-label">сон в ср.</span></div>
       <div><span class="trio-num">${s.steps_avg ?? '–'}</span><span class="trio-label">шаги в ср.</span></div></div>
-      <div class="muted small center">Питание за 7 дней: ${a.kcal_avg ? `${a.kcal_avg} ккал в день` : 'не записывал'}${a.kcal_target ? ` при норме ${a.kcal_target}` : ''}. Питание тренер только видит.</div></div>
+      <div class="muted small center">Питание за 7 дней: ${a.kcal_avg ? `${a.kcal_avg} ккал в день` : 'не записывал'}${a.kcal_target ? `, норма ${a.kcal_target}` : ''}</div></div>
     <div class="sheet-section"><div class="widget-row"><h3>Посещаемость</h3><span class="muted small">${a.stats.percent !== null ? `${a.stats.present} из ${a.stats.sessions} · ${a.stats.percent}%` : ''}</span></div>
       <div id="sgHistory"></div></div>
     <div class="sheet-section"><h3>Цели</h3><div id="sgGoals"></div>
       <div class="inline-form"><input type="text" id="sgGoalInput" placeholder="Цель для спортсмена" maxlength="200"><button class="btn-plus" id="sgGoalAdd">+</button></div>
-      <label class="switch-row"><input type="checkbox" id="sgGoalDaily" checked> <span>Каждый день</span></label></div>
+      <div class="seg" id="sgGoalDaily"><button type="button" data-v="1" class="active">Каждый день</button><button type="button" data-v="0">Только сегодня</button></div></div>
     <button class="btn btn-danger" id="sgRemove">Убрать из клуба</button>`;
+  segInit(body.querySelector('#sgGoalDaily'));
   const chips = body.querySelector('#sgGroups');
   trainerData.groups.forEach((g) => {
     const c = document.createElement('button');
@@ -744,7 +803,7 @@ async function openAthlete(id) {
       if (!r) return;
       on = !on;
       c.classList.toggle('active', on);
-      toast(on ? `Поставил: ${g.name}. Бот написал спортсмену` : `Убрал: ${g.name}`);
+      toast(on ? `Поставил: ${g.name}` : `Убрал: ${g.name}`);
       a.group_ids = r.group_ids;
       openAthlete(a.id);
     });
@@ -765,8 +824,8 @@ async function openAthlete(id) {
   body.querySelector('#sgGoalAdd').addEventListener('click', async () => {
     const title = body.querySelector('#sgGoalInput').value.trim();
     if (!title) return;
-    const r = await api(`/api/trainer/athlete/${a.id}/goals`, { json: { title, daily: body.querySelector('#sgGoalDaily').checked } });
-    if (r) { toast('Цель добавлена, бот написал спортсмену'); openAthlete(a.id); }
+    const r = await api(`/api/trainer/athlete/${a.id}/goals`, { json: { title, daily: segValue(body.querySelector('#sgGoalDaily')) } });
+    if (r) { toast('Цель добавлена'); openAthlete(a.id); }
   });
   body.querySelector('#sgRemove').addEventListener('click', async () => {
     if (!(await confirmDialog(`Убрать ${a.name} из клуба? Он потеряет доступ, группы снимутся.`, 'Убрать'))) return;
@@ -819,39 +878,91 @@ function renderGroups() {
   trainerData.groups.forEach((g) => {
     const row = document.createElement('div');
     row.className = 'group-card tap';
-    row.innerHTML = `<div class="widget-row" style="margin:0"><div class="group-name">${esc(g.name)}</div><span class="muted small">${g.members} чел.</span></div>
-      <div class="muted small">${esc(g.location)} · ${esc(g.days_text)}, ${esc(g.start)}–${esc(g.end)}</div>`;
-    row.addEventListener('click', async () => {
-      const next = row.nextElementSibling;
-      if (next && next.classList.contains('group-detail')) { next.remove(); return; }
-      list.querySelectorAll('.group-detail').forEach((el) => el.remove());
-      const detail = document.createElement('div');
-      detail.className = 'group-detail';
-      detail.appendChild(groupForm(g));
-      const sess = await api(`/api/trainer/group/${g.id}/sessions`);
-      const sBox = document.createElement('div');
-      sBox.innerHTML = '<h3 style="margin:12px 0 6px">Ближайшие занятия</h3>';
-      (sess || []).forEach((s) => {
-        const r = document.createElement('div');
-        r.className = `session-mini${s.cancelled ? ' cancelled' : ''}`;
-        r.innerHTML = `<span>${s.weekday} ${ddmm(s.date)} · ${s.start}${s.cancelled ? ' · отменено' : ''}</span>`;
-        const b = document.createElement('button');
-        b.className = `btn-small${s.cancelled ? ' accent' : ''}`;
-        b.textContent = s.cancelled ? 'Вернуть' : 'Отменить';
-        b.addEventListener('click', async () => {
-          if (!s.cancelled && !(await confirmDialog(`Отменить занятие ${s.weekday} ${ddmm(s.date)}? Бот напишет всем в группе.`, 'Отменить'))) return;
-          const res = await api(`/api/trainer/group/${g.id}/cancel`, { json: { date: s.date, cancel: !s.cancelled } });
-          if (res) { toast(`Готово, написал ${res.notified} чел.`); row.click(); row.click(); }
-        });
-        r.appendChild(b);
-        sBox.appendChild(r);
-      });
-      detail.appendChild(sBox);
-      row.after(detail);
-    });
+    row.innerHTML = `<div class="group-head"><div class="group-main"><div class="group-name">${esc(g.name)}</div>
+      <div class="muted small">${esc(g.location)} · ${esc(g.days_text)}, ${esc(g.start)}–${esc(g.end)} · ${g.members} чел.</div></div></div>`;
+    const edit = iconButton('pencil', 'Изменить группу');
+    edit.addEventListener('click', (e) => { e.stopPropagation(); toggleDetail(row, 'form', () => groupForm(g)); });
+    row.querySelector('.group-head').appendChild(edit);
+    row.addEventListener('click', () => toggleDetail(row, 'roster', () => rosterView(g, row)));
     list.appendChild(row);
   });
   if (!trainerData.groups.length) list.innerHTML = '<div class="empty">Групп нет – создай первую плюсом</div>';
+}
+
+// Под карточкой группы раскрыта одна панель: правка группы или состав занятий
+function toggleDetail(row, kind, build) {
+  const next = row.nextElementSibling;
+  const opened = next && next.classList.contains('group-detail') && next.dataset.kind === kind;
+  document.querySelectorAll('#groupList .group-detail').forEach((el) => el.remove());
+  if (opened) return;
+  const detail = document.createElement('div');
+  detail.className = 'group-detail';
+  detail.dataset.kind = kind;
+  row.after(detail);
+  Promise.resolve(build()).then((el) => { if (el) detail.appendChild(el); });
+}
+
+async function rosterView(g, row) {
+  const box = document.createElement('div');
+  const items = await api(`/api/trainer/group/${g.id}/roster`);
+  if (!items) return box;
+  if (!items.length) box.innerHTML = '<div class="empty">Ближайших занятий нет</div>';
+  const reload = () => {
+    document.querySelectorAll('#groupList .group-detail').forEach((el) => el.remove());
+    toggleDetail(row, 'roster', () => rosterView(g, row));
+  };
+  items.forEach((r) => {
+    const sec = document.createElement('div');
+    sec.className = `roster${r.cancelled ? ' cancelled' : ''}`;
+    const when = r.date === isoDay(new Date()) ? 'Сегодня' : `${r.weekday} ${ddmm(r.date)}`;
+    const info = r.cancelled ? 'Отменено'
+      : `${r.lead ? `Ведёт ${esc(r.lead.name)}` : '<span class="warn">Никто не взял</span>'} · будут ${r.going}, не смогут ${r.not_going}`;
+    sec.innerHTML = `<div class="roster-head"><div><b>${when} · ${esc(r.start)}</b><div class="muted small">${info}</div></div>
+      <span class="roster-actions"></span></div>`;
+    const actions = sec.querySelector('.roster-actions');
+    if (!r.cancelled) actions.appendChild(leadButton(r, reload));
+    if (!r.started) {
+      const c = document.createElement('button');
+      c.className = 'btn-small';
+      c.textContent = r.cancelled ? 'Вернуть' : 'Отменить';
+      c.addEventListener('click', async () => {
+        if (!r.cancelled && !(await confirmDialog(`Отменить занятие: ${when.toLowerCase()} в ${r.start}? Бот напишет всей группе.`, 'Отменить'))) return;
+        const res = await api(`/api/trainer/group/${g.id}/cancel`, { json: { date: r.date, cancel: !r.cancelled } });
+        if (res) { toast(r.cancelled ? 'Вернул занятие, группе написал' : 'Отменил, группе написал'); reload(); }
+      });
+      actions.appendChild(c);
+    }
+    if (!r.cancelled) {
+      if (!r.members.length) sec.insertAdjacentHTML('beforeend', '<div class="empty">В группе никого</div>');
+      r.members.forEach((m) => {
+        const line = document.createElement('div');
+        line.className = 'member';
+        line.innerHTML = `<span>${esc(m.name)}</span>`;
+        if (r.started) {
+          const chips = document.createElement('span');
+          chips.className = 'chips';
+          [['Был', true], ['Не был', false]].forEach(([label, val]) => {
+            const b = document.createElement('button');
+            b.className = `chip small-chip${m.present === val ? ' active' : ''}`;
+            b.textContent = label;
+            b.addEventListener('click', async () => {
+              const res = await api(`/api/trainer/athlete/${m.id}/attendance`,
+                { json: { group_id: r.group_id, date: r.date, present: m.present === val ? null : val } });
+              if (res) reload();
+            });
+            chips.appendChild(b);
+          });
+          line.appendChild(chips);
+        } else {
+          line.insertAdjacentHTML('beforeend', m.going === true ? '<span class="tag tag-green">будет</span>'
+            : m.going === false ? '<span class="tag tag-red">не сможет</span>' : '<span class="tag">не ответил</span>');
+        }
+        sec.appendChild(line);
+      });
+    }
+    box.appendChild(sec);
+  });
+  return box;
 }
 
 document.getElementById('locToggle').addEventListener('click', () => {
@@ -871,6 +982,10 @@ document.getElementById('locAddBtn').addEventListener('click', async () => {
   if (!me) return;
   document.getElementById('helloName').textContent = me.name ? `Привет, ${me.name}` : 'Привет';
   document.getElementById('helloSub').textContent = me.club || '';
-  if (me.is_trainer) document.getElementById('navTrainer').classList.remove('hidden');
+  if (me.is_trainer) {
+    // тренеру своя вкладка вместо «Клуба»: группы ему не ставятся
+    document.getElementById('navTrainer').classList.remove('hidden');
+    document.querySelector('.nav-btn[data-screen="club"]').classList.add('hidden');
+  }
   loaders.home();
 })();

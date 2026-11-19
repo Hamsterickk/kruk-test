@@ -57,17 +57,17 @@ def _user_tick(user: User, now: datetime) -> int:
     if morning <= now < morning + timedelta(hours=2) and mark(user.id, 'morning', today.isoformat()):
         text, markup = morning_message(user, today, groups)
         sent += send(user.tg_id, text, markup)
-    # завтра тренировка
+    # завтра тренировка – с кнопками «буду / не смогу»
     if TOMORROW_FROM <= now.hour < TOMORROW_TO:
         tomorrow = today + timedelta(days=1)
-        lines = []
         for s in club.sessions(groups, tomorrow, tomorrow):
-            if not s['cancelled'] and mark(user.id, 'tomorrow', f"{s['group'].id}:{tomorrow}"):
-                lines.append(club.session_text(s, with_day=False))
-        if lines:
-            sent += send(user.tg_id, '🥋 Завтра тренировка:\n' + '\n'.join(f"– {x}" for x in lines))
+            g = s['group']
+            if not s['cancelled'] and mark(user.id, 'tomorrow', f"{g.id}:{tomorrow}"):
+                kb = buttons([[('✅ Буду', f"rsvp:{g.id}:{tomorrow}:1"), ('Не смогу', f"rsvp:{g.id}:{tomorrow}:0")]])
+                sent += send(user.tg_id, f"🥋 Завтра тренировка: {club.session_text(s, with_day=False)}", kb)
+    rsvp = club.rsvp_map(user.id, today, today)
     for s in club.sessions(groups, today, today):
-        if s['cancelled']:
+        if s['cancelled'] or rsvp.get((s['group'].id, today)) is False:
             continue
         start, end = club.session_start(s), club.session_end(s)
         ref = f"{s['group'].id}:{today}"
@@ -83,11 +83,50 @@ def _user_tick(user: User, now: datetime) -> int:
                 g = s['group']
                 kb = buttons([[('💪 Был', f"att:{g.id}:{today}:1"), ('Не был', f"att:{g.id}:{today}:0")]])
                 sent += send(user.tg_id, f"Как тренировка – {g.name}, {g.start_time}? Отметь:", kb)
+    if user.is_trainer and user.club_id:
+        sent += _trainer_tick(user, now)
     # итог дня
     evening = datetime.combine(today, datetime.min.time()).replace(hour=EVENING_AT[0], minute=EVENING_AT[1])
     if evening <= now and mark(user.id, 'evening', today.isoformat()):
         sent += send(user.tg_id, evening_summary(user, today))
     return sent
+
+
+def _ask_time(s: dict) -> datetime:
+    """Когда спрашивать тренеров «кто берёт»: утренние занятия – накануне в 20:00,
+    остальные – в 9:00 того же дня."""
+    start = club.session_start(s)
+    if start.hour < 11:
+        return datetime.combine(s['date'] - timedelta(days=1), datetime.min.time()).replace(hour=20)
+    return datetime.combine(s['date'], datetime.min.time()).replace(hour=9)
+
+
+def _trainer_tick(user: User, now: datetime) -> int:
+    sent = 0
+    today = now.date()
+    sessions = [s for s in club.club_sessions(user.club_id, today, today + timedelta(days=1)) if not s['cancelled']]
+    leads = club.leads([s['group'].id for s in sessions], today, today + timedelta(days=1))
+    for s in sessions:
+        g, start = s['group'], club.session_start(s)
+        ref = f"{g.id}:{s['date']}"
+        lead = leads.get((g.id, s['date']))
+        if not lead and _ask_time(s) <= now < start and mark(user.id, 'whotakes', ref):
+            day = 'Сегодня' if s['date'] == today else 'Завтра'
+            kb = buttons([[('🙋 Беру', f"lead:{g.id}:{s['date']}")]])
+            sent += send(user.tg_id, f"🥋 {day} {club.session_text(s, with_day=False)}\nКто ведёт?", kb)
+        if lead and lead.trainer_id == user.id and s['date'] == today and start - SOON_BEFORE <= now < start \
+                and mark(user.id, 'lead_soon', ref):
+            r = club.roster(g, s['date'])
+            sent += send(user.tg_id, f"⏰ Ты ведёшь в {g.start_time}: {club.session_text(s, with_day=False)}\n"
+                                     f"В группе {len(r['members'])}, будут {r['going']}, не смогут {r['not_going']}")
+    return sent
+
+
+def notify_lead_taken(trainer: User, group, day: date) -> int:
+    s = {'group': group, 'date': day, 'cancelled': False, 'note': None}
+    others = User.query.filter(User.club_id == trainer.club_id, User.id != trainer.id, User.is_active == True,  # noqa: E712
+                               User.role.in_(['trainer', 'admin'])).all()
+    return sum(send(o.tg_id, f"✅ {trainer.name} ведёт: {club.session_text(s)}") for o in others)
 
 
 def morning_message(user: User, day: date, groups: list) -> tuple[str, dict | None]:

@@ -139,6 +139,27 @@ def callback(user, data: str) -> str:
         if present == '1':
             return '💪 Отметил: был. Если хочешь, напиши, что отрабатывали – запишу в дневник.'
         return 'Отметил: не был.'
+    if kind == 'rsvp':
+        group_id, day, going = rest.split(':')
+        group_id, day = int(group_id), date.fromisoformat(day)
+        if group_id not in [g.id for g in club.user_groups(user.id)]:
+            return 'Эта группа у тебя больше не стоит'
+        club.set_rsvp(user.id, group_id, day, going == '1')
+        return '✅ Записал: будешь. Тренер видит.' if going == '1' else 'Ок, отметил, что не сможешь. Тренер видит.'
+    if kind == 'lead':
+        from app.models import Group
+        from app.services import reminders
+        group_id, day = rest.split(':')
+        grp = Group.query.filter_by(id=int(group_id), club_id=user.club_id).first()
+        if not user.is_trainer or not grp:
+            return 'Это кнопка для тренеров'
+        day = date.fromisoformat(day)
+        ok, who = club.take_lead(grp.id, day, user.id)
+        if not ok:
+            return f"Уже ведёт {who}"
+        reminders.notify_lead_taken(user, grp, day)
+        s = {'group': grp, 'date': day, 'cancelled': False, 'note': None}
+        return f"💪 Ты ведёшь: {club.session_text(s)}. Остальные тренеры в курсе."
     if kind == 'goal':
         g = Goal.query.filter_by(id=int(rest or 0), user_id=user.id, is_active=True).first()
         if not g:

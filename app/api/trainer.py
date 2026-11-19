@@ -6,7 +6,7 @@ from datetime import date, datetime, timedelta
 from flask import Blueprint, jsonify, request, g, current_app
 
 from app.auth import trainer_required
-from app.models import db, User, Club, Group, Location, Membership, SessionCancel, Goal, ADMIN
+from app.models import db, User, Club, Group, Location, Membership, SessionCancel, Goal, ADMIN, ATHLETE
 from app.services import club, goals, body, foods, reminders
 
 bp = Blueprint('trainer', __name__)
@@ -14,8 +14,9 @@ TIME_RE = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
 
 
 def _athlete(user_id: int) -> User | None:
+    """Только спортсмены своего клуба. Тренеры в группы не ставятся и не правятся."""
     u = db.session.get(User, user_id)
-    return u if u and u.club_id == g.user.club_id and u.is_active else None
+    return u if u and u.club_id == g.user.club_id and u.is_active and u.role == ATHLETE else None
 
 
 def _group(group_id: int) -> Group | None:
@@ -34,7 +35,7 @@ def overview():
     people = User.query.filter_by(club_id=c.id, is_active=True).order_by(User.name).all()
     athletes = []
     for u in people:
-        if u.onboarding_step is not None:
+        if u.onboarding_step is not None or u.role != ATHLETE:
             continue
         stats = club.attendance_stats(u.id, 30)
         s = body.summary(u.id)
@@ -47,7 +48,8 @@ def overview():
     return jsonify({
         'club': c.name, 'athlete_link': _link(c.join_code),
         'trainer_link': _link(c.trainer_code) if g.user.role == ADMIN else None,
-        'athletes': athletes, 'registering': pending,
+        'athletes': athletes, 'registering': pending, 'me': g.user.id,
+        'trainers': [{'id': u.id, 'name': u.name} for u in people if u.role != ATHLETE and u.onboarding_step is None],
         'groups': [{**club.group_json(x), 'members': len(club.group_members(x.id))} for x in groups],
         'locations': [{'id': l.id, 'name': l.name, 'address': l.address}
                       for l in Location.query.filter_by(club_id=c.id).order_by(Location.id).all()],
@@ -202,6 +204,43 @@ def group_sessions(group_id):
             out.append({'date': s['date'].isoformat(), 'weekday': club.WD_SHORT[s['date'].weekday()],
                         'start': grp.start_time, 'cancelled': s['cancelled'], 'note': s['note']})
     return jsonify(out)
+
+
+@bp.route('/group/<int:group_id>/roster')
+@trainer_required
+def group_roster(group_id):
+    """Ближайшие занятия группы: кто ведёт, кто придёт. Сегодняшнее – с отметками, кто был."""
+    grp = _group(group_id)
+    if not grp:
+        return jsonify({'error': 'Группа не найдена'}), 404
+    out = []
+    for s in club.sessions([grp], date.today(), date.today() + timedelta(days=14)):
+        if club.session_end(s) + timedelta(hours=4) > datetime.now():
+            out.append(club.roster(grp, s['date']))
+        if len(out) == 3:
+            break
+    return jsonify(out)
+
+
+@bp.route('/group/<int:group_id>/lead', methods=['POST'])
+@trainer_required
+def group_lead(group_id):
+    grp = _group(group_id)
+    data = request.json or {}
+    try:
+        day = date.fromisoformat(str(data.get('date')))
+    except ValueError:
+        day = None
+    if not grp or not day or day.weekday() not in grp.days or day < date.today():
+        return jsonify({'error': 'Такого занятия нет'}), 400
+    if data.get('take', True):
+        ok, who = club.take_lead(grp.id, day, g.user.id)
+        if not ok:
+            return jsonify({'error': f'Уже ведёт {who}'}), 409
+        reminders.notify_lead_taken(g.user, grp, day)
+    else:
+        club.release_lead(grp.id, day, g.user.id)
+    return jsonify(club.roster(grp, day))
 
 
 @bp.route('/group/<int:group_id>/cancel', methods=['POST'])

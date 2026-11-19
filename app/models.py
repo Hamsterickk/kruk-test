@@ -91,6 +91,27 @@ class SessionCancel(db.Model):
     __table_args__ = (db.UniqueConstraint('group_id', 'on_date'),)
 
 
+class SessionLead(db.Model):
+    """Кто из тренеров ведёт занятие группы в конкретный день."""
+    __tablename__ = 'session_leads'
+    id = db.Column(db.Integer, primary_key=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    on_date = db.Column(db.Date, nullable=False)
+    trainer_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    __table_args__ = (db.UniqueConstraint('group_id', 'on_date'),)
+
+
+class Rsvp(db.Model):
+    """Спортсмен заранее ответил: буду или не смогу."""
+    __tablename__ = 'rsvp'
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    group_id = db.Column(db.Integer, db.ForeignKey('groups.id'), nullable=False)
+    on_date = db.Column(db.Date, nullable=False)
+    going = db.Column(db.Boolean, nullable=False)
+    __table_args__ = (db.UniqueConstraint('user_id', 'group_id', 'on_date'),)
+
+
 class Attendance(db.Model):
     __tablename__ = 'attendance'
     id = db.Column(db.Integer, primary_key=True)

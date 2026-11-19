@@ -2,7 +2,7 @@
 import secrets
 from datetime import date, datetime, timedelta
 
-from app.models import db, Club, Location, Group, Membership, SessionCancel, Attendance
+from app.models import db, Club, Location, Group, Membership, SessionCancel, Attendance, SessionLead, Rsvp, User, ATHLETE
 
 WD_SHORT = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 WD_ACC = ['в понедельник', 'во вторник', 'в среду', 'в четверг', 'в пятницу', 'в субботу', 'в воскресенье']
@@ -180,3 +180,75 @@ def week_count(user_id: int) -> tuple[int, int]:
     monday = date.today() - timedelta(days=date.today().weekday())
     rows = [r for r in history(user_id, 7) if r['date'] >= monday.isoformat() and not r['cancelled']]
     return sum(1 for r in rows if r['present']), len(rows)
+
+
+# ===== КТО ВЕДЁТ И КТО ПРИДЁТ =====
+
+def leads(group_ids: list[int], start: date, end: date) -> dict:
+    if not group_ids:
+        return {}
+    rows = SessionLead.query.filter(SessionLead.group_id.in_(group_ids), SessionLead.on_date >= start,
+                                    SessionLead.on_date <= end).all()
+    return {(r.group_id, r.on_date): r for r in rows}
+
+
+def take_lead(group_id: int, day: date, trainer_id: int) -> tuple[bool, str | None]:
+    """(взял, кто уже ведёт). Уже ведёт другой – не перебиваем."""
+    row = SessionLead.query.filter_by(group_id=group_id, on_date=day).first()
+    if row and row.trainer_id != trainer_id:
+        other = db.session.get(User, row.trainer_id)
+        return False, other.name if other else 'другой тренер'
+    if not row:
+        db.session.add(SessionLead(group_id=group_id, on_date=day, trainer_id=trainer_id))
+        db.session.commit()
+    return True, None
+
+
+def release_lead(group_id: int, day: date, trainer_id: int) -> bool:
+    row = SessionLead.query.filter_by(group_id=group_id, on_date=day, trainer_id=trainer_id).first()
+    if not row:
+        return False
+    db.session.delete(row)
+    db.session.commit()
+    return True
+
+
+def set_rsvp(user_id: int, group_id: int, day: date, going: bool):
+    row = Rsvp.query.filter_by(user_id=user_id, group_id=group_id, on_date=day).first()
+    if not row:
+        row = Rsvp(user_id=user_id, group_id=group_id, on_date=day, going=going)
+        db.session.add(row)
+    row.going = going
+    db.session.commit()
+
+
+def rsvp_map(user_id: int, start: date, end: date) -> dict:
+    rows = Rsvp.query.filter(Rsvp.user_id == user_id, Rsvp.on_date >= start, Rsvp.on_date <= end).all()
+    return {(r.group_id, r.on_date): r.going for r in rows}
+
+
+def roster(group: Group, day: date) -> dict:
+    """Занятие глазами тренера: кто ведёт и кто из группы придёт или пришёл."""
+    lead = SessionLead.query.filter_by(group_id=group.id, on_date=day).first()
+    lead_user = db.session.get(User, lead.trainer_id) if lead else None
+    members = User.query.filter(User.id.in_(group_members(group.id) or [0]), User.is_active == True,  # noqa: E712
+                                User.role == ATHLETE).order_by(User.name).all()
+    ids = [m.id for m in members] or [0]
+    rs = {r.user_id: r.going for r in Rsvp.query.filter(Rsvp.group_id == group.id, Rsvp.on_date == day, Rsvp.user_id.in_(ids)).all()}
+    att = {a.user_id: a.present for a in Attendance.query.filter(Attendance.group_id == group.id, Attendance.on_date == day,
+                                                                 Attendance.user_id.in_(ids)).all()}
+    cancel = SessionCancel.query.filter_by(group_id=group.id, on_date=day).first()
+    s = {'group': group, 'date': day, 'cancelled': bool(cancel), 'note': cancel.note if cancel else None}
+    return {
+        'group_id': group.id, 'date': day.isoformat(), 'weekday': WD_SHORT[day.weekday()],
+        'start': group.start_time, 'end': group.end_time, 'cancelled': bool(cancel),
+        'started': session_start(s) <= datetime.now(),
+        'lead': {'id': lead_user.id, 'name': lead_user.name} if lead_user else None,
+        'members': [{'id': m.id, 'name': m.name, 'going': rs.get(m.id), 'present': att.get(m.id)} for m in members],
+        'going': sum(1 for v in rs.values() if v), 'not_going': sum(1 for v in rs.values() if v is False),
+    }
+
+
+def club_sessions(club_id: int, start: date, end: date) -> list[dict]:
+    groups = Group.query.filter_by(club_id=club_id, is_active=True).all()
+    return sessions(groups, start, end)
