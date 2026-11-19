@@ -1065,5 +1065,10 @@ document.getElementById('locAddBtn').addEventListener('click', async () => {
     document.getElementById('navTrainer').classList.remove('hidden');
     document.querySelector('.nav-btn[data-screen="club"]').classList.add('hidden');
   }
+  if (me.role === 'admin') {
+    // админу трекер не нужен: питание, цели, тело и чат убраны
+    document.body.classList.add('admin');
+    ['food', 'body', 'chat'].forEach((n) => document.querySelector(`.nav-btn[data-screen="${n}"]`).classList.add('hidden'));
+  }
   loaders.home();
 })();

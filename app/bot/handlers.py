@@ -10,7 +10,7 @@ from telegram.error import BadRequest
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 from app.models import db, User, Club, Message, AiUsage, Goal, ATHLETE, TRAINER, ADMIN
-from app.services import chat, profile, goals, reminders, club
+from app.services import chat, profile, goals, reminders, club, avatars
 from app.services.tg import md_to_html, send
 from app.services.club import new_code
 
@@ -143,6 +143,17 @@ def register(tg_id: int, first_name: str, username: str | None, code: str | None
     return {'status': 'new', 'user_id': user.id}
 
 
+def _refresh_avatar(user_id: int):
+    """На /start аватарку берём сразу, не ждём ночной проверки."""
+    if Ctx.flask_app.config.get('TESTING'):
+        return
+    try:
+        avatars.refresh(db.session.get(User, user_id))
+    except Exception:
+        db.session.rollback()
+        logger.warning('Аватарка не обновилась', exc_info=True)
+
+
 def user_state(tg_id: int) -> dict | None:
     u = User.query.filter_by(tg_id=tg_id).first()
     if not u:
@@ -161,6 +172,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _reply(update, 'Тренер убрал тебя из клуба. Чтобы вернуться – попроси у него новую ссылку.')
         return
     state = await run(user_state, tg.id)
+    await run(_refresh_avatar, state['id'])
     if state['step']:
         if res['status'] == 'new':
             await _reply(update, 'Привет! Это тестовый бот Kruk Team: питание, вес, сон, шаги, цели и тренировки клуба. '

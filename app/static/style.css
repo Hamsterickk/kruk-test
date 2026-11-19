@@ -268,6 +268,9 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 #toast.show { transform: translate(-50%, 0); }
 .session > .btn-small { align-self: center; }
 
+/* админ: только тренировки клуба и вкладка «Тренер» */
+body.admin .tracker { display: none; }
+
 /* ===== v3: карточки занятий, участники, залы ===== */
 .hello-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .scard { border-bottom: 1px solid var(--border); }

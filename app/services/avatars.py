@@ -12,7 +12,8 @@ from app.models import db, User
 from app.services import tg
 
 logger = logging.getLogger(__name__)
-RECHECK = timedelta(hours=24)
+RECHECK = timedelta(hours=24)        # аватарка есть – проверяем раз в сутки
+RECHECK_EMPTY = timedelta(hours=1)   # не было – раз в час: вдруг человек открыл её боту
 
 
 def folder() -> str:
@@ -63,9 +64,10 @@ def refresh(user: User) -> bool:
 
 def refresh_due(limit: int = 5) -> int:
     """Несколько человек за раз, у кого давно не проверяли. Зовётся из минутного тика бота."""
-    edge = datetime.utcnow() - RECHECK
+    now = datetime.utcnow()
     users = User.query.filter(User.is_active == True,  # noqa: E712
-                              (User.photo_checked_at.is_(None)) | (User.photo_checked_at < edge)) \
+                              (User.photo_checked_at.is_(None)) | (User.photo_checked_at < now - RECHECK)
+                              | ((User.photo_id.is_(None) | (User.photo_id == '')) & (User.photo_checked_at < now - RECHECK_EMPTY))) \
         .order_by(User.photo_checked_at.asc().nullsfirst()).limit(limit).all()
     n = 0
     for u in users:

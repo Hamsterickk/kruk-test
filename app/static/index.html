@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/400.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/600.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/700.css">
-  <link rel="stylesheet" href="style.css?v=4">
+  <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
   <div id="gate" class="gate hidden">
@@ -29,7 +29,7 @@
         <span class="badge">тест</span>
       </div>
 
-      <div class="widget">
+      <div class="widget tracker">
         <div class="widget-row"><h3>Питание сегодня</h3><span class="muted small" id="homeKcalNote"></span></div>
         <div class="kcal-line"><span class="kcal-big" id="homeKcal">0</span><span class="muted" id="homeKcalOf"></span></div>
         <div class="bar"><div class="bar-fill" id="homeKcalBar"></div></div>
@@ -41,7 +41,7 @@
         <div id="homeSessions"></div>
       </div>
 
-      <div class="widget">
+      <div class="widget tracker">
         <div class="widget-row"><h3>Цели дня</h3><span class="muted small" id="homeGoalsCount"></span></div>
         <div id="homeGoals"></div>
         <div class="inline-form">
@@ -51,7 +51,7 @@
         <div class="seg" id="goalDaily"><button type="button" data-v="1" class="active">Каждый день</button><button type="button" data-v="0">Только сегодня</button></div>
       </div>
 
-      <div class="widget tap" id="homeBody">
+      <div class="widget tap tracker" id="homeBody">
         <div class="widget-row"><h3>Вес, сон, шаги</h3><span class="chevron">›</span></div>
         <div class="trio">
           <div><span class="trio-num" id="homeWeight">–</span><span class="trio-label">вес, кг</span></div>
@@ -239,6 +239,6 @@
     </div>
   </div>
   <div id="toast"></div>
-  <script src="main.js?v=4"></script>
+  <script src="main.js?v=5"></script>
 </body>
 </html>
