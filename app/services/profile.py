@@ -5,27 +5,53 @@ from app.models import db, User
 from app.services import body
 from datetime import date
 
-GOALS = {'gain': 'Набор массы', 'cut': 'Сушка', 'keep': 'Поддержание'}
-STEPS = ['name', 'sex', 'age', 'height', 'weight', 'goal']
+STEPS = ['name', 'sex', 'age', 'height', 'weight']
 QUESTIONS = {
     'name': 'Как тебя зовут?',
     'sex': 'Пол?',
     'age': 'Сколько тебе лет? Напиши числом',
     'height': 'Рост в сантиметрах?',
     'weight': 'Вес сейчас, кг? Например 74.5',
-    'goal': 'Какая цель?',
 }
 
 
 def compute_targets(user: User, weight: float | None) -> None:
-    """Миффлин – Сан Жеор, активность 1,55: тренировки 3 раза в неделю.
-    Набор +10%, сушка −15%. Белок 1,8 г на кг, на сушке 2 г."""
+    """Миффлин – Сан Жеор на поддержание, активность 1,55: тренировки 3 раза в неделю.
+    Белок 1,8 г на кг. Что человек поставил сам, не трогаем."""
     if not (weight and user.age and user.height_cm and user.sex):
         return
     bmr = 10 * weight + 6.25 * user.height_cm - 5 * user.age + (5 if user.sex == 'm' else -161)
-    kcal = bmr * 1.55 * {'gain': 1.10, 'cut': 0.85}.get(user.goal, 1.0)
-    user.kcal_target = int(round(kcal / 50) * 50)
-    user.protein_target = int(round(weight * (2.0 if user.goal == 'cut' else 1.8)))
+    if not user.kcal_manual:
+        user.kcal_target = int(round(bmr * 1.55 / 50) * 50)
+    if not user.protein_manual:
+        user.protein_target = int(round(weight * 1.8))
+
+
+def set_targets(user: User, kcal=None, protein=None, reset: bool = False) -> str | None:
+    """Норма вручную: из чата или приложения. reset – снова считать по анкете. Ошибка или None."""
+    if reset:
+        user.kcal_manual = user.protein_manual = False
+        compute_targets(user, latest_weight(user.id))
+        return None
+    if kcal is not None:
+        if not 1000 <= kcal <= 6000:
+            return 'Норма калорий – от 1000 до 6000'
+        user.kcal_target, user.kcal_manual = int(round(kcal)), True
+    if protein is not None:
+        if not 30 <= protein <= 400:
+            return 'Белок – от 30 до 400 г'
+        user.protein_target, user.protein_manual = int(round(protein)), True
+    return None
+
+
+NAME_RE = re.compile(r"^[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё' -]{0,39}$")
+
+
+def clean_name(text: str) -> str | None:
+    text = re.sub(r'\s+', ' ', (text or '').strip(' .,!'))
+    if not NAME_RE.match(text):
+        return None
+    return text[:1].upper() + text[1:]
 
 
 def latest_weight(user_id: int) -> float | None:
@@ -37,9 +63,10 @@ def answer(user: User, text: str) -> str | None:
     step = user.onboarding_step
     text = (text or '').strip()
     if step == 'name':
-        if not 1 <= len(text) <= 40:
-            return 'Имя покороче, до 40 букв'
-        user.name = text
+        name = clean_name(text)
+        if not name:
+            return 'Напиши имя буквами, до 40 символов'
+        user.name = name
     elif step == 'sex':
         low = text.lower()
         if low.startswith(('м', 'm')):
@@ -64,11 +91,6 @@ def answer(user: User, text: str) -> str | None:
         if not 30 <= w <= 250:
             return 'Вес числом, например 74.5'
         body.save(user.id, date.today(), weight=w)
-    elif step == 'goal':
-        key = next((k for k, v in GOALS.items() if text.lower() in (k, v.lower())), None)
-        if not key:
-            return 'Выбери цель кнопкой'
-        user.goal = key
     nxt = STEPS.index(step) + 1
     user.onboarding_step = STEPS[nxt] if nxt < len(STEPS) else None
     if user.onboarding_step is None:
@@ -85,5 +107,5 @@ def skip(user: User):
 
 def norm_text(user: User) -> str:
     if not user.kcal_target:
-        return 'Норму посчитаю, когда будут рост, вес, возраст и цель'
+        return 'Норму посчитаю, когда будут рост, вес и возраст'
     return f"Твоя норма: {user.kcal_target} ккал в день, белок {user.protein_target} г"

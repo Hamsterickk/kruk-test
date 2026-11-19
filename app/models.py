@@ -33,10 +33,14 @@ class User(db.Model):
     sex = db.Column(db.String(1))
     age = db.Column(db.Integer)
     height_cm = db.Column(db.Integer)
-    goal = db.Column(db.String(8))  # gain / cut / keep
+    goal = db.Column(db.String(8))  # больше не спрашиваем, норма считается на поддержание
     kcal_target = db.Column(db.Integer)
     protein_target = db.Column(db.Integer)
+    kcal_manual = db.Column(db.Boolean, default=False)     # норму поставил сам человек – не пересчитывать
+    protein_manual = db.Column(db.Boolean, default=False)
     morning_hour = db.Column(db.Integer, default=10)
+    photo_id = db.Column(db.String(200))       # file_unique_id аватарки в телеграме, '' – аватарки нет
+    photo_checked_at = db.Column(db.DateTime)
 
     @property
     def is_trainer(self) -> bool:

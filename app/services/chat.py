@@ -4,8 +4,7 @@ import re
 from datetime import date
 
 from app.models import db, Message, Pending, Goal
-from app.services import foods, body, goals, club, ai
-from app.services.tg import buttons
+from app.services import foods, body, goals, club, ai, profile
 
 logger = logging.getLogger(__name__)
 
@@ -16,10 +15,12 @@ HELP = (
     "– шаги: «8000 шагов», задним числом – «вчера 9к шагов»\n"
     "– новый продукт в базу: «Сырок 407 8.5 27.8 32 порция 40» – ккал, Б, Ж, У на 100 г\n"
     "– тренировка: «был на тренировке, отрабатывали удушения»\n"
+    "– поправить: «это был греческий йогурт», «там было 200 г», «моя норма 2400»\n"
     "Всё это видно и в приложении."
 )
 
 
+NAME_RE = re.compile(r'^(?:меня зовут|зови меня|называй меня|мо[её] имя)\s*[:–-]?\s*(?P<name>[A-Za-zА-Яа-яЁё][A-Za-zА-Яа-яЁё -]{0,39}?)\s*[.!)]*$', re.I)
 TRAIN_RE = re.compile(r'^(?P<neg>не\s+)?(был|была|ходил|ходила|сходил|сходила)\s+на\s+(тренировк\w*|трен\w*|занят\w*)', re.I)
 
 
@@ -33,17 +34,6 @@ def save(user_id: int, role: str, content: str) -> Message:
 def history(user_id: int, limit: int = 100) -> list[Message]:
     rows = Message.query.filter_by(user_id=user_id).order_by(Message.id.desc()).limit(limit).all()
     return list(reversed(rows))
-
-
-def _remember_offer(user_id: int, estimated: list[dict]) -> dict | None:
-    if not estimated:
-        return None
-    p = Pending(user_id=user_id, kind='remember', payload={'items': estimated})
-    db.session.add(p)
-    db.session.commit()
-    names = ', '.join(i['name'] for i in estimated)
-    label = f"Запомнить {names}"[:60]
-    return buttons([[(label, f"rem:{p.id}"), ('Не надо', f"remno:{p.id}")]])
 
 
 def handle(user, text: str) -> dict:
@@ -64,6 +54,13 @@ def _script(user, text: str) -> dict | None:
     low = text.lower().strip()
     if low in ('/help', 'помощь', 'что умеешь', 'что ты умеешь'):
         return {'text': HELP, 'markup': None}
+    m = NAME_RE.match(text.strip())
+    if m and len(m.group('name').split()) <= 3:
+        name = profile.clean_name(m.group('name'))
+        if name:
+            user.name = name
+            db.session.commit()
+            return {'text': f"Приятно познакомиться, {name} 👊 Имя поменял, тренер видит его так же.", 'markup': None}
     new_food = foods.parse_new_food(text)
     if new_food:
         f = foods.remember_food(user.id, new_food['name'], new_food['kcal'], new_food['protein'],
@@ -110,7 +107,7 @@ def _ai(user, text: str, prior: list[dict]) -> dict:
         db.session.rollback()
         logger.exception('Ошибка ИИ')
         return {'text': 'Что-то пошло не так, попробуй ещё раз', 'markup': None}
-    return {'text': result['text'], 'markup': _remember_offer(user.id, result['estimated'])}
+    return {'text': result['text'], 'markup': None}
 
 
 # ===== КНОПКИ =====
@@ -119,17 +116,9 @@ def callback(user, data: str) -> str:
     """Нажатие кнопки → текст ответа. Одинаково из телеграма и из приложения."""
     kind, _, rest = data.partition(':')
     if kind in ('rem', 'remno'):
-        p = Pending.query.filter_by(id=int(rest or 0), user_id=user.id).first()
-        if not p:
-            return 'Уже неактуально'
-        items = p.payload.get('items', [])
-        db.session.delete(p)
+        Pending.query.filter_by(user_id=user.id).delete()
         db.session.commit()
-        if kind == 'remno':
-            return 'Ок, не запоминаю'
-        for i in items:
-            foods.remember_food(user.id, i['name'], i['kcal'], i['protein'], i['fat'], i['carbs'], i.get('portion'))
-        return '📒 Запомнил в твою базу: ' + ', '.join(i['name'] for i in items)
+        return 'Кнопка устарела'
     if kind == 'att':
         group_id, day, present = rest.split(':')
         group_id, day = int(group_id), date.fromisoformat(day)

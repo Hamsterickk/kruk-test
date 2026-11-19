@@ -5,14 +5,16 @@ from datetime import date, datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
 
+from flask import current_app
+
 from app.models import db, User, SentMark
-from app.services import foods, body, goals, club
+from app.services import foods, body, goals, club, avatars
 from app.services.tg import send, buttons
 
 logger = logging.getLogger(__name__)
 
-TOMORROW_FROM, TOMORROW_TO = 20, 22    # «завтра тренировка» – с 20 до 22
-SOON_BEFORE = timedelta(hours=2)       # в день занятия – за 2 часа, если оно не раньше 10:00
+BEFORE = timedelta(minutes=90)        # тренировка – за полтора часа, с кнопками «буду / не смогу»
+GOALS_AT = 12                          # цели в день без тренировки – в полдень
 ASK_AFTER = timedelta(minutes=10)      # «был?» – через 10 минут после конца
 ASK_UNTIL = timedelta(hours=4)
 EVENING_AT = (22, 30)
@@ -45,38 +47,64 @@ def tick(now: datetime | None = None) -> int:
         except Exception:
             db.session.rollback()
             logger.exception('Напоминания для %s упали', user.id)
+    if not current_app.config.get('TESTING'):
+        try:
+            avatars.refresh_due()
+        except Exception:
+            db.session.rollback()
+            logger.exception('Аватарки упали')
     return sent
+
+
+def rsvp_row(group_id: int, day: date, going: bool | None) -> list:
+    return [('✅ Буду' if going is True else 'Буду', f"rsvp:{group_id}:{day}:1"),
+            ('✖️ Не смогу' if going is False else 'Не смогу', f"rsvp:{group_id}:{day}:0")]
+
+
+def goal_rows(items: list[dict]) -> list:
+    return [[(('✅ ' if x['done'] else '▫️ ') + x['title'][:40], f"goal:{x['id']}")] for x in items]
+
+
+def before_message(s: dict, going: bool | None, now: datetime, goal_items: list | None = None) -> tuple[str, dict]:
+    g = s['group']
+    r = club.roster(g, s['date'])
+    minutes = int((club.session_start(s) - now).total_seconds() // 60)
+    when = 'через полтора часа' if minutes >= 80 else f"через {max(minutes, 1)} мин"
+    lines = [f"🥋 Тренировка {when}, в {g.start_time} – {g.name}, {r['location']}"]
+    who = f"Ведёт {r['lead']['name']} · " if r['lead'] else ''
+    lines.append(f"{who}будут {r['going']} из {r['members_count']}")
+    lines.append('Ты отметил, что будешь 💪' if going else 'Придёшь?')
+    rows = [rsvp_row(g.id, s['date'], going)]
+    if goal_items:
+        lines.append('\n🎯 Цели на сегодня – отмечай кнопками:')
+        rows += goal_rows(goal_items)
+    return '\n'.join(lines), buttons(rows)
 
 
 def _user_tick(user: User, now: datetime) -> int:
     sent = 0
     today = now.date()
     groups = club.user_groups(user.id)
-    # утро
-    morning = datetime.combine(today, datetime.min.time()).replace(hour=user.morning_hour or 10)
-    if morning <= now < morning + timedelta(hours=2) and mark(user.id, 'morning', today.isoformat()):
-        text, markup = morning_message(user, today, groups)
-        sent += send(user.tg_id, text, markup)
-    # завтра тренировка – с кнопками «буду / не смогу»
-    if TOMORROW_FROM <= now.hour < TOMORROW_TO:
-        tomorrow = today + timedelta(days=1)
-        for s in club.sessions(groups, tomorrow, tomorrow):
-            g = s['group']
-            if not s['cancelled'] and mark(user.id, 'tomorrow', f"{g.id}:{tomorrow}"):
-                kb = buttons([[('✅ Буду', f"rsvp:{g.id}:{tomorrow}:1"), ('Не смогу', f"rsvp:{g.id}:{tomorrow}:0")]])
-                sent += send(user.tg_id, f"🥋 Завтра тренировка: {club.session_text(s, with_day=False)}", kb)
+    todays = [s for s in club.sessions(groups, today, today) if not s['cancelled']]
     rsvp = club.rsvp_map(user.id, today, today)
-    for s in club.sessions(groups, today, today):
-        if s['cancelled'] or rsvp.get((s['group'].id, today)) is False:
-            continue
-        start, end = club.session_start(s), club.session_end(s)
-        ref = f"{s['group'].id}:{today}"
-        # скоро тренировка
-        if start.hour >= 10 and start - SOON_BEFORE <= now < start and mark(user.id, 'soon', ref):
-            minutes = int((start - now).total_seconds() // 60)
-            when = f"через {minutes} мин" if minutes < 90 else f"в {s['group'].start_time}"
-            sent += send(user.tg_id, f"⏰ Тренировка {when}: {club.session_text(s, with_day=False)}")
-        # был?
+    going_today = [s for s in todays if rsvp.get((s['group'].id, today)) is not False]
+    goal_items = goals.as_json(user.id, today)
+    open_goals = [x for x in goal_items if not x['done']]
+    for s in going_today:
+        start, ref = club.session_start(s), f"{s['group'].id}:{today}"
+        # за полтора часа – с кнопками и целями дня
+        if start - BEFORE <= now < start and mark(user.id, 'before', ref):
+            with_goals = bool(open_goals) and mark(user.id, 'goals', today.isoformat())
+            text, markup = before_message(s, rsvp.get((s['group'].id, today)), now, goal_items if with_goals else None)
+            sent += send(user.tg_id, text, markup)
+    # день без тренировки – цели в полдень, если они есть
+    noon = datetime.combine(today, datetime.min.time()).replace(hour=GOALS_AT)
+    if not going_today and open_goals and noon <= now < noon + timedelta(hours=3) \
+            and mark(user.id, 'goals', today.isoformat()):
+        sent += send(user.tg_id, '🎯 Цели на сегодня – отмечай кнопками:', buttons(goal_rows(goal_items)))
+    # был?
+    for s in going_today:
+        end, ref = club.session_end(s), f"{s['group'].id}:{today}"
         if end + ASK_AFTER <= now < end + ASK_UNTIL:
             marked = club.attendance_map(user.id, today, today).get((s['group'].id, today))
             if not marked and mark(user.id, 'ask', ref):
@@ -114,7 +142,7 @@ def _trainer_tick(user: User, now: datetime) -> int:
             day = 'Сегодня' if s['date'] == today else 'Завтра'
             kb = buttons([[('🙋 Беру', f"lead:{g.id}:{s['date']}")]])
             sent += send(user.tg_id, f"🥋 {day} {club.session_text(s, with_day=False)}\nКто ведёт?", kb)
-        if lead and lead.trainer_id == user.id and s['date'] == today and start - SOON_BEFORE <= now < start \
+        if lead and lead.trainer_id == user.id and s['date'] == today and start - BEFORE <= now < start \
                 and mark(user.id, 'lead_soon', ref):
             r = club.roster(g, s['date'])
             sent += send(user.tg_id, f"⏰ Ты ведёшь в {g.start_time}: {club.session_text(s, with_day=False)}\n"
@@ -122,32 +150,34 @@ def _trainer_tick(user: User, now: datetime) -> int:
     return sent
 
 
+def _trainers(club_id: int, except_id: int) -> list[User]:
+    return User.query.filter(User.club_id == club_id, User.id != except_id, User.is_active == True,  # noqa: E712
+                             User.role.in_(['trainer', 'admin'])).all()
+
+
 def notify_lead_taken(trainer: User, group, day: date) -> int:
+    """Тренерам – кто взял, спортсменам группы – кто у них ведёт."""
     s = {'group': group, 'date': day, 'cancelled': False, 'note': None}
-    others = User.query.filter(User.club_id == trainer.club_id, User.id != trainer.id, User.is_active == True,  # noqa: E712
-                               User.role.in_(['trainer', 'admin'])).all()
-    return sum(send(o.tg_id, f"✅ {trainer.name} ведёт: {club.session_text(s)}") for o in others)
+    if club.session_start(s) <= datetime.now():
+        return 0
+    n = sum(send(o.tg_id, f"✅ {trainer.name} ведёт: {club.session_text(s)}") for o in _trainers(trainer.club_id, trainer.id))
+    when = club.day_word(day)
+    text = f"🥋 {when[:1].upper() + when[1:]} в {group.start_time} {group.name} ведёт {trainer.name}"
+    for uid in club.group_members(group.id):
+        u = db.session.get(User, uid)
+        if u and u.is_active and u.onboarded:
+            n += send(u.tg_id, text)
+    return n
 
 
-def morning_message(user: User, day: date, groups: list) -> tuple[str, dict | None]:
-    lines = [f"☀️ Доброе утро{', ' + user.name if user.name else ''}!"]
-    todays = [s for s in club.sessions(groups, day, day) if not s['cancelled']]
-    if todays:
-        lines.append('🥋 Сегодня тренировка: ' + '; '.join(club.session_text(s, with_day=False) for s in todays))
-    m = body.peek(user.id, day)
-    ask = []
-    if m.weight is None:
-        ask.append('вес')
-    if m.sleep is None:
-        ask.append('сон')
-    if ask:
-        lines.append(f"Напиши {' и '.join(ask)}: например «74.5 7»")
-    rows = []
-    g = goals.as_json(user.id, day)
-    if g:
-        lines.append('🎯 Цели на сегодня – отмечай кнопками:')
-        rows = [[(('✅ ' if x['done'] else '▫️ ') + x['title'][:40], f"goal:{x['id']}")] for x in g]
-    return '\n'.join(lines), (buttons(rows) if rows else None)
+def notify_lead_released(trainer: User, group, day: date) -> int:
+    """Тренер отказался – остальным снова «кто ведёт?» с кнопкой."""
+    s = {'group': group, 'date': day, 'cancelled': False, 'note': None}
+    if club.session_start(s) <= datetime.now():
+        return 0
+    kb = buttons([[('🙋 Беру', f"lead:{group.id}:{day}")]])
+    return sum(send(o.tg_id, f"⚠️ {trainer.name} не сможет вести: {club.session_text(s)}\nКто ведёт?", kb)
+               for o in _trainers(trainer.club_id, trainer.id))
 
 
 def evening_summary(user: User, day: date) -> str:

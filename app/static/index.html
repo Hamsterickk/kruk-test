@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/400.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/600.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/700.css">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
 </head>
 <body>
   <div id="gate" class="gate hidden">
@@ -25,7 +25,7 @@
     <!-- СЕГОДНЯ -->
     <section id="screen-home" class="screen active">
       <div class="hello">
-        <div><div class="hello-name" id="helloName">Привет</div><div class="hello-sub" id="helloSub"></div></div>
+        <div class="hello-left"><span id="helloAvatar"></span><div><div class="hello-name" id="helloName">Привет</div><div class="hello-sub" id="helloSub"></div></div></div>
         <span class="badge">тест</span>
       </div>
 
@@ -131,14 +131,14 @@
 
       <div class="widget">
         <h3>Профиль и норма</h3>
-        <div class="muted small" id="normText"></div>
         <div class="grid2">
-          <label class="field">Цель<select id="pGoal"><option value="gain">Набор массы</option><option value="keep">Поддержание</option><option value="cut">Сушка</option></select></label>
-          <label class="field">Утро в<select id="pMorning"></select></label>
+          <label class="field">Норма, ккал<input type="number" id="pKcal" inputmode="numeric"></label>
+          <label class="field">Белок, г<input type="number" id="pProtein" inputmode="numeric"></label>
           <label class="field">Возраст<input type="number" id="pAge" inputmode="numeric"></label>
           <label class="field">Рост, см<input type="number" id="pHeight" inputmode="numeric"></label>
         </div>
-        <button class="btn btn-ghost" id="profileSaveBtn">Сохранить профиль</button>
+        <div class="hint" id="normText"></div>
+        <button class="btn btn-ghost" id="profileSaveBtn">Сохранить</button>
       </div>
     </section>
 
@@ -149,8 +149,8 @@
         <div id="myGroups"></div>
       </div>
       <div class="widget">
-        <h3>Ближайшие занятия</h3>
-        <div id="upcomingList"></div>
+        <h3>Залы</h3>
+        <div id="hallList"></div>
       </div>
       <div class="widget">
         <div class="widget-row"><h3>Дневник посещений</h3><span class="muted small">30 дней</span></div>
@@ -238,6 +238,6 @@
     </div>
   </div>
   <div id="toast"></div>
-  <script src="main.js?v=2"></script>
+  <script src="main.js?v=3"></script>
 </body>
 </html>

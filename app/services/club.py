@@ -58,7 +58,7 @@ def group_json(g: Group) -> dict:
 
 def group_line(g: Group) -> str:
     loc = db.session.get(Location, g.location_id)
-    where = f", {loc.name}" + (f" – {loc.address}" if loc and loc.address else '') if loc else ''
+    where = f", {loc.name}" if loc else ''
     return f"{g.name}{where}. {days_text(g.days)}, {g.start_time}–{g.end_time}"
 
 
@@ -106,12 +106,23 @@ def session_end(s: dict) -> datetime:
     return datetime.combine(s['date'], datetime.min.time()).replace(hour=h, minute=m)
 
 
+def day_word(day: date) -> str:
+    """Сегодня / завтра / «в ср 21.11» – для сообщений."""
+    delta = (day - date.today()).days
+    if delta == 0:
+        return 'сегодня'
+    if delta == 1:
+        return 'завтра'
+    return f"{WD_SHORT[day.weekday()].lower()} {day:%d.%m}"
+
+
 def session_text(s: dict, with_day: bool = True) -> str:
+    """«Ср 21.11, 07:30 – Взрослые утро, Белый Лотос». Адрес – во вкладке «Клуб», в залах."""
     g = s['group']
     loc = db.session.get(Location, g.location_id)
     when = f"{WD_SHORT[s['date'].weekday()]} {s['date']:%d.%m}, " if with_day else ''
-    where = f", {loc.name}" + (f" – {loc.address}" if loc.address else '') if loc else ''
-    return f"{when}{g.start_time}–{g.end_time} – {g.name}{where}"
+    where = f", {loc.name}" if loc else ''
+    return f"{when}{g.start_time} – {g.name}{where}"
 
 
 # ===== ПОСЕЩАЕМОСТЬ =====
@@ -228,7 +239,8 @@ def rsvp_map(user_id: int, start: date, end: date) -> dict:
 
 
 def roster(group: Group, day: date) -> dict:
-    """Занятие глазами тренера: кто ведёт и кто из группы придёт или пришёл."""
+    """Занятие: кто ведёт и кто из группы придёт или пришёл. Одинаково для тренера и спортсмена."""
+    from app.services.avatars import url as avatar
     lead = SessionLead.query.filter_by(group_id=group.id, on_date=day).first()
     lead_user = db.session.get(User, lead.trainer_id) if lead else None
     members = User.query.filter(User.id.in_(group_members(group.id) or [0]), User.is_active == True,  # noqa: E712
@@ -239,12 +251,16 @@ def roster(group: Group, day: date) -> dict:
                                                                  Attendance.user_id.in_(ids)).all()}
     cancel = SessionCancel.query.filter_by(group_id=group.id, on_date=day).first()
     s = {'group': group, 'date': day, 'cancelled': bool(cancel), 'note': cancel.note if cancel else None}
+    loc = db.session.get(Location, group.location_id)
     return {
-        'group_id': group.id, 'date': day.isoformat(), 'weekday': WD_SHORT[day.weekday()],
-        'start': group.start_time, 'end': group.end_time, 'cancelled': bool(cancel),
+        'group_id': group.id, 'group': group.name, 'location': loc.name if loc else '',
+        'date': day.isoformat(), 'weekday': WD_SHORT[day.weekday()],
+        'start': group.start_time, 'end': group.end_time, 'cancelled': bool(cancel), 'note': s['note'],
         'started': session_start(s) <= datetime.now(),
-        'lead': {'id': lead_user.id, 'name': lead_user.name} if lead_user else None,
-        'members': [{'id': m.id, 'name': m.name, 'going': rs.get(m.id), 'present': att.get(m.id)} for m in members],
+        'lead': {'id': lead_user.id, 'name': lead_user.name, 'avatar': avatar(lead_user)} if lead_user else None,
+        'members': [{'id': m.id, 'name': m.name, 'avatar': avatar(m), 'going': rs.get(m.id), 'present': att.get(m.id)}
+                    for m in members],
+        'members_count': len(members),
         'going': sum(1 for v in rs.values() if v), 'not_going': sum(1 for v in rs.values() if v is False),
     }
 

@@ -1,11 +1,13 @@
 """API спортсмена: профиль, еда, вес-сон-шаги, цели, клуб, чат. Всё – только своё."""
 from datetime import date, datetime, timedelta
 
-from flask import Blueprint, jsonify, request, g
+import os
+
+from flask import Blueprint, jsonify, request, g, send_file, abort
 
 from app.auth import user_required
-from app.models import db, Club, Food, Meal, Goal
-from app.services import foods, body, goals, club, chat, profile, ai
+from app.models import db, Club, Food, Meal, Goal, Location
+from app.services import foods, body, goals, club, chat, profile, ai, avatars
 
 bp = Blueprint('athlete', __name__)
 
@@ -37,10 +39,10 @@ def me():
     u = g.user
     c = db.session.get(Club, u.club_id) if u.club_id else None
     return jsonify({
-        'name': u.name, 'role': u.role, 'is_trainer': u.is_trainer, 'club': c.name if c else None,
-        'goal': u.goal, 'goal_text': profile.GOALS.get(u.goal), 'kcal_target': u.kcal_target,
-        'protein_target': u.protein_target, 'morning_hour': u.morning_hour, 'sex': u.sex, 'age': u.age,
-        'height_cm': u.height_cm, 'ai_left': ai.left_today(u.id),
+        'id': u.id, 'name': u.name, 'role': u.role, 'is_trainer': u.is_trainer, 'club': c.name if c else None,
+        'avatar': avatars.url(u), 'kcal_target': u.kcal_target, 'protein_target': u.protein_target,
+        'kcal_manual': bool(u.kcal_manual), 'protein_manual': bool(u.protein_manual),
+        'sex': u.sex, 'age': u.age, 'height_cm': u.height_cm, 'ai_left': ai.left_today(u.id),
     })
 
 
@@ -48,13 +50,6 @@ def me():
 @user_required
 def update_me():
     u, data = g.user, request.json or {}
-    if 'morning_hour' in data:
-        h = _num(data['morning_hour'], 5, 12)
-        if h is None:
-            return jsonify({'error': 'Утро – с 5 до 12 часов'}), 400
-        u.morning_hour = int(h)
-    if data.get('goal') in profile.GOALS:
-        u.goal = data['goal']
     if 'age' in data:
         a = _num(data['age'], 18, 90)
         if a is None:
@@ -66,10 +61,36 @@ def update_me():
             return jsonify({'error': 'Рост от 120 до 230 см'}), 400
         u.height_cm = int(h)
     if data.get('name'):
-        u.name = str(data['name']).strip()[:40]
+        name = profile.clean_name(str(data['name']))
+        if not name:
+            return jsonify({'error': 'Имя – только буквы, до 40 символов'}), 400
+        u.name = name
+    # норма: число – своя навсегда, пусто – снова по анкете
+    for key, flag in (('kcal_target', 'kcal_manual'), ('protein_target', 'protein_manual')):
+        if key not in data:
+            continue
+        if data[key] in (None, ''):
+            setattr(u, flag, False)
+            continue
+        v = _num(data[key], 0, 100000)
+        err = profile.set_targets(u, **({'kcal': v} if key == 'kcal_target' else {'protein': v})) if v is not None else 'Норма числом'
+        if err:
+            db.session.rollback()
+            return jsonify({'error': err}), 400
     profile.compute_targets(u, profile.latest_weight(u.id))
     db.session.commit()
     return me()
+
+
+@bp.route('/avatar/<int:user_id>')
+def avatar(user_id):
+    """Картинка по подписанной ссылке из ответов API – чужую без подписи не открыть."""
+    if not avatars.check_sign(user_id, request.args.get('s', '')):
+        abort(404)
+    path = avatars.file_path(user_id)
+    if not os.path.exists(path):
+        abort(404)
+    return send_file(path, mimetype='image/jpeg', max_age=7 * 86400)
 
 
 @bp.route('/today')
@@ -78,42 +99,39 @@ def today():
     u = g.user
     t = foods.totals(foods.day_meals(u.id))
     m = body.peek(u.id, date.today())
-    groups = club.user_groups(u.id)
-    upcoming = [s for s in club.sessions(groups, date.today(), date.today() + timedelta(days=6))
-                if club.session_end(s) > datetime.now()][:4]
-    att = club.attendance_map(u.id, date.today(), date.today())
-    rs = club.rsvp_map(u.id, date.today(), date.today() + timedelta(days=6))
     return jsonify({
         'food': t, 'kcal_target': u.kcal_target, 'protein_target': u.protein_target,
         'weight': m.weight, 'sleep': m.sleep, 'steps': m.steps,
         'goals': goals.as_json(u.id),
-        'sessions': [_session_json(s, att, rs) for s in upcoming],
+        'sessions': _trainer_sessions(u) if u.is_trainer else _my_sessions(u),
         'week': dict(zip(('present', 'total'), club.week_count(u.id))),
-        'club_sessions': _trainer_sessions(u) if u.is_trainer else None,
     })
 
 
-def _trainer_sessions(u):
-    """Тренеру на главной – занятия клуба сегодня и завтра: кто ведёт, сколько придёт."""
-    out = []
-    for s in club.club_sessions(u.club_id, date.today(), date.today() + timedelta(days=1)):
-        if club.session_end(s) <= datetime.now():
-            continue
-        r = club.roster(s['group'], s['date'])
-        r.update({'group': s['group'].name, 'location': club.group_json(s['group'])['location'],
-                  'members_count': len(r.pop('members'))})
-        out.append(r)
-    return out
+def _card(s: dict, u, rs: dict | None = None, att: dict | None = None) -> dict:
+    """Занятие для главной: кто ведёт, сколько придёт, список. Своё «буду» и «был» – отдельно."""
+    r = club.roster(s['group'], s['date'])
+    key = (s['group'].id, s['date'])
+    a = (att or {}).get(key)
+    r.update({'my_going': (rs or {}).get(key), 'my_present': a.present if a else None,
+              'by_trainer': bool(a and a.set_by == 'trainer')})
+    return r
 
 
-def _session_json(s, att=None, rs=None):
-    a = (att or {}).get((s['group'].id, s['date']))
-    return {'group_id': s['group'].id, 'group': s['group'].name, 'date': s['date'].isoformat(),
-            'weekday': club.WD_SHORT[s['date'].weekday()], 'start': s['group'].start_time,
-            'end': s['group'].end_time, 'location': club.group_json(s['group'])['location'],
-            'address': club.group_json(s['group'])['address'], 'cancelled': s['cancelled'], 'note': s['note'],
-            'present': a.present if a else None, 'started': club.session_start(s) <= datetime.now(),
-            'going': (rs or {}).get((s['group'].id, s['date']))}
+def _my_sessions(u) -> list[dict]:
+    """Спортсмену – его занятия на неделю вперёд. Прошедшее держим 4 часа, чтобы отметить «был»."""
+    start, end = date.today(), date.today() + timedelta(days=7)
+    rs, att = club.rsvp_map(u.id, start, end), club.attendance_map(u.id, start, start)
+    sess = [s for s in club.sessions(club.user_groups(u.id), start, end)
+            if club.session_end(s) + timedelta(hours=4) > datetime.now()]
+    return [_card(s, u, rs, att) for s in sess[:6]]
+
+
+def _trainer_sessions(u) -> list[dict]:
+    """Тренеру – все занятия клуба сегодня и завтра."""
+    sess = [s for s in club.club_sessions(u.club_id, date.today(), date.today() + timedelta(days=1))
+            if club.session_end(s) + timedelta(hours=4) > datetime.now()]
+    return [_card(s, u) for s in sess]
 
 
 # ===== ЕДА =====
@@ -319,13 +337,9 @@ def goals_delete(goal_id):
 @user_required
 def club_my():
     u = g.user
-    groups = club.user_groups(u.id)
-    start = date.today()
-    sess = [s for s in club.sessions(groups, start, start + timedelta(days=7)) if club.session_end(s) > datetime.now()]
-    att = club.attendance_map(u.id, start, start)
-    rs = club.rsvp_map(u.id, start, start + timedelta(days=7))
-    return jsonify({'groups': [club.group_json(x) for x in groups],
-                    'upcoming': [_session_json(s, att, rs) for s in sess],
+    locs = Location.query.filter_by(club_id=u.club_id).order_by(Location.id).all()
+    return jsonify({'groups': [club.group_json(x) for x in club.user_groups(u.id)],
+                    'locations': [{'id': l.id, 'name': l.name, 'address': l.address} for l in locs],
                     'history': club.history(u.id, 30), 'stats': club.attendance_stats(u.id, 30)})
 
 
@@ -359,7 +373,7 @@ def club_rsvp():
     group_id = int(data.get('group_id') or 0)
     grp = db.session.get(club.Group, group_id)
     if not day or not grp or group_id not in [x.id for x in club.user_groups(g.user.id)] or day < date.today() \
-            or day.weekday() not in grp.days:
+            or day > date.today() + timedelta(days=14) or day.weekday() not in grp.days:
         return jsonify({'error': 'Такого занятия у тебя нет'}), 400
     club.set_rsvp(g.user.id, group_id, day, bool(data.get('going')))
     return jsonify({'ok': True})

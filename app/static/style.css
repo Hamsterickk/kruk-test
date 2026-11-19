@@ -189,7 +189,8 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 .athlete-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .athlete-row:last-child { border-bottom: none; }
 .athlete-main { flex: 1; min-width: 0; font-size: 0.9rem; }
-.avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; }
+.avatar { position: relative; overflow: hidden; width: 38px; height: 38px; border-radius: 50%; color: #fff; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; flex-shrink: 0; }
+.avatar img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 
 /* выезжающая карточка */
 .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 50; display: flex; align-items: flex-end; }
@@ -266,3 +267,40 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--a
 }
 #toast.show { transform: translate(-50%, 0); }
 .session > .btn-small { align-self: center; }
+
+/* ===== v3: карточки занятий, участники, залы ===== */
+.hello-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.scard { border-bottom: 1px solid var(--border); }
+.scard:last-child { border-bottom: none; }
+.scard-head { display: flex; align-items: center; gap: 12px; padding: 10px 0; cursor: pointer; }
+.scard-when { width: 74px; flex-shrink: 0; display: flex; flex-direction: column; line-height: 1.15; }
+.scard-time { font-size: 1.15rem; color: var(--accent); font-weight: 700; }
+.scard-date { font-size: 0.95rem; color: var(--text); font-weight: 700; }
+.scard-info { flex: 1; min-width: 0; font-size: 0.9rem; }
+.scard-group { font-weight: 600; }
+.scard-info .tag { margin: 4px 0 0; }
+.scard-count { flex-shrink: 0; text-align: right; font-size: 0.8rem; color: var(--text-muted); }
+.scard-count b { font-family: "Bebas Neue", sans-serif; font-size: 1.5rem; color: var(--head); font-weight: 400; }
+.scard.cancelled .scard-time, .scard.cancelled .scard-date, .scard.cancelled .scard-group { text-decoration: line-through; color: var(--text-muted); }
+.scard-body { display: none; padding: 0 0 12px; }
+.scard.open .scard-body { display: block; }
+.scard.open .scard-head { padding-bottom: 8px; }
+.scard-actions { margin-bottom: 8px; display: flex; justify-content: flex-start; }
+.scard-actions .seg { margin-top: 0; }
+.seg.wide { width: 100%; }
+.members-title { font-size: 0.72rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; margin: 10px 0 2px; }
+.member-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.member .seg { margin-top: 0; width: auto; flex-shrink: 0; }
+.member .seg button { padding: 5px 10px; }
+.hall { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.hall:last-child { border-bottom: none; }
+.hall-main { min-width: 0; }
+.person { display: inline-flex; align-items: center; gap: 5px; margin: 2px 8px 2px 0; color: var(--text); }
+.sheet-title { display: flex; align-items: center; gap: 10px; }
+.grams-box { display: block; }
+.grams-row { display: flex; align-items: center; gap: 8px; }
+.grams-row input { margin-bottom: 0; }
+.grams-quick { display: flex; gap: 6px; margin-top: 8px; }
+.grams-quick .chip { flex: 1; justify-content: center; text-align: center; }
+.seg button { white-space: nowrap; }
+.member .seg button { padding: 5px 9px; font-size: 0.76rem; }

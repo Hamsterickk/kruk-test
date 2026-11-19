@@ -46,6 +46,24 @@ const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2,
 const ddmm = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`;
 const wdOf = (iso) => WD[(new Date(`${iso}T12:00:00`).getDay() + 6) % 7];
 
+// Аватарка: буква всегда под картинкой, картинка не загрузилась – видна буква
+const AV_COLORS = ['#2f8f63', '#3a7ca5', '#8a6bbf', '#b5835a', '#4f9a8a', '#a35d7a'];
+function avatarHtml(name, url, size = 38) {
+  const n = String(name || '?');
+  const color = AV_COLORS[[...n].reduce((a, c) => a + c.charCodeAt(0), 0) % AV_COLORS.length];
+  const img = url ? `<img src="${esc(url)}" alt="" loading="lazy" onerror="this.remove()">` : '';
+  return `<span class="avatar" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.42)}px;background:${color}">${esc(n.slice(0, 1).toUpperCase())}${img}</span>`;
+}
+
+// Поиск по имени без разницы, кириллица или латиница: «м» находит Maxim, «k» – Костю
+const CYR = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'c', ч: 'ch', ш: 'sh', щ: 'sh', ъ: '', ы: 'i', ь: '', э: 'e', ю: 'u', я: 'a' };
+function latin(text) {
+  return [...String(text || '').toLowerCase()].map((c) => CYR[c] ?? c).join('')
+    .replace(/yu|iu/g, 'u').replace(/ya|ia/g, 'a').replace(/kh/g, 'h').replace(/ck/g, 'k').replace(/ph/g, 'f')
+    .replace(/x/g, 'ks').replace(/w/g, 'v').replace(/q/g, 'k').replace(/[yj]/g, 'i').replace(/tz|ts/g, 'c');
+}
+const nameMatches = (name, q) => !q || String(name).toLowerCase().includes(q.toLowerCase()) || latin(name).includes(latin(q));
+
 // Переключатель из двух кнопок вместо галочки
 function segInit(el) {
   el.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
@@ -148,30 +166,102 @@ function kcalBlock(prefix, totals, target, proteinTarget) {
     <span><b>${totals.fat}</b> жиры</span><span><b>${totals.carbs}</b> углеводы</span>`;
 }
 
-function sessionRow(s, onMark, rsvpDays = 7) {
-  const row = document.createElement('div');
-  row.className = `session${s.cancelled ? ' cancelled' : ''}`;
-  const today = s.date === isoDay(new Date());
-  const when = today ? 'Сегодня' : `${s.weekday} ${ddmm(s.date)}`;
-  row.innerHTML = `
-    <div class="session-time"><b>${esc(s.start)}</b><span>${esc(when)}</span></div>
-    <div class="session-info"><div>${esc(s.group)}</div><div class="muted small">${esc(s.location)}${s.address ? ` · ${esc(s.address)}` : ''}</div>
-    ${s.cancelled ? `<div class="tag tag-red">Отменено${s.note ? `: ${esc(s.note)}` : ''}</div>` : ''}</div>`;
-  const soon = (new Date(`${s.date}T00:00:00`) - new Date(isoDay(new Date()) + 'T00:00:00')) / 864e5 < rsvpDays;
-  if (onMark && !s.cancelled && (s.started || soon)) {
-    const box = document.createElement('div');
-    box.className = 'mark-btns';
-    const opts = s.started ? [['Был', true, s.present], ['Не был', false, s.present]] : [['Буду', true, s.going], ['Не смогу', false, s.going]];
-    opts.forEach(([label, val, cur]) => {
-      const b = document.createElement('button');
-      b.className = `chip small-chip${cur === val ? ' active' : ''}`;
-      b.textContent = label;
-      b.addEventListener('click', () => (s.started ? onMark(s, val) : setRsvp(s, val)));
-      box.appendChild(b);
-    });
-    row.querySelector('.session-info').appendChild(box);
+// Занятие свёрнуто: время, дата, группа, зал, кто ведёт, сколько придёт. Тап – раскрыть:
+// спортсмену «буду / не смогу» и список, тренеру «беру» и список с отметками
+const openCards = new Set();
+function whenText(iso) {
+  const diff = Math.round((new Date(`${iso}T12:00:00`) - new Date(`${isoDay(new Date())}T12:00:00`)) / 864e5);
+  return diff === 0 ? 'Сегодня' : diff === 1 ? 'Завтра' : `${wdOf(iso)} ${ddmm(iso)}`;
+}
+
+function sessionCard(r, trainerMode) {
+  const key = `${r.group_id}:${r.date}`;
+  const card = document.createElement('div');
+  card.className = `scard${r.cancelled ? ' cancelled' : ''}${openCards.has(key) ? ' open' : ''}`;
+  const lead = r.lead ? `ведёт ${esc(r.lead.name)}` : (trainerMode ? '<span class="warn">никто не взял</span>' : '');
+  let mine = '';
+  if (r.cancelled) mine = `<span class="tag tag-red">отменено${r.note ? `: ${esc(r.note)}` : ''}</span>`;
+  else if (!trainerMode && r.started) mine = r.my_present === true ? '<span class="tag tag-green">был</span>' : r.my_present === false ? '<span class="tag tag-red">не был</span>' : '';
+  else if (!trainerMode) mine = r.my_going === true ? '<span class="tag tag-green">будешь</span>' : r.my_going === false ? '<span class="tag tag-red">не сможешь</span>' : '';
+  card.innerHTML = `<div class="scard-head">
+      <div class="scard-when"><b class="scard-time">${esc(r.start)}</b><b class="scard-date">${whenText(r.date)}</b></div>
+      <div class="scard-info"><div class="scard-group">${esc(r.group)}</div>
+        <div class="muted small">${esc(r.location)}${lead ? ` · ${lead}` : ''}</div>${mine ? `<div>${mine}</div>` : ''}</div>
+      ${r.cancelled ? '' : `<div class="scard-count" title="будут из группы"><b>${r.going}</b><span>/${r.members_count}</span></div>`}
+    </div><div class="scard-body"></div>`;
+  const body = card.querySelector('.scard-body');
+  const build = () => {
+    body.innerHTML = '';
+    if (r.cancelled) { body.innerHTML = '<div class="empty">Занятие отменено</div>'; return; }
+    const actions = document.createElement('div');
+    actions.className = 'scard-actions';
+    if (trainerMode) {
+      actions.appendChild(leadButton(r, refreshCurrent));
+    } else if (!r.started) {
+      actions.appendChild(choice([['Буду', true], ['Не смогу', false]], r.my_going, (v) => setRsvp(r, v)));
+    } else if (r.by_trainer) {
+      actions.innerHTML = '<div class="muted small">Отметил тренер</div>';
+    } else {
+      actions.appendChild(choice([['Был', true], ['Не был', false]], r.my_present, (v) => markAttendance(r, v)));
+    }
+    body.appendChild(actions);
+    body.appendChild(membersBlock(r, trainerMode, refreshCurrent));
+  };
+  if (openCards.has(key)) build();
+  card.querySelector('.scard-head').addEventListener('click', () => {
+    const open = !card.classList.contains('open');
+    card.classList.toggle('open', open);
+    if (open) { openCards.add(key); build(); } else openCards.delete(key);
+  });
+  return card;
+}
+
+// Две кнопки «да / нет» на всю ширину
+function choice(options, current, onPick) {
+  const box = document.createElement('div');
+  box.className = 'seg wide';
+  options.forEach(([label, val]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = current === val ? 'active' : '';
+    b.textContent = label;
+    b.addEventListener('click', (e) => { e.stopPropagation(); onPick(val); });
+    box.appendChild(b);
+  });
+  return box;
+}
+
+// Кто придёт: до начала – по ответам, после – кто был. Тренер после начала отмечает каждого
+function membersBlock(r, trainerMode, reload) {
+  const box = document.createElement('div');
+  box.className = 'members';
+  if (!r.members.length) { box.innerHTML = '<div class="empty">В группе пока никого</div>'; return box; }
+  const line = (m, right) => {
+    const el = document.createElement('div');
+    el.className = 'member';
+    el.innerHTML = `<span class="member-name">${avatarHtml(m.name, m.avatar, 28)}<span>${esc(m.name)}</span></span>`;
+    if (right) el.appendChild(right);
+    return el;
+  };
+  if (r.started && trainerMode) {
+    r.members.forEach((m) => box.appendChild(line(m, choice([['Был', true], ['Не был', false]], m.present, async (val) => {
+      const res = await api(`/api/trainer/athlete/${m.id}/attendance`,
+        { json: { group_id: r.group_id, date: r.date, present: m.present === val ? null : val } });
+      if (res) reload();
+    }))));
+    return box;
   }
-  return row;
+  const field = r.started ? 'present' : 'going';
+  const groups = r.started
+    ? [['Были', true], ['Не были', false], ['Не отмечены', null]]
+    : [['Будут', true], ['Не смогут', false], ['Не ответили', null]];
+  groups.forEach(([title, val]) => {
+    const list = r.members.filter((m) => (m[field] ?? null) === val);
+    if (!list.length) return;
+    box.insertAdjacentHTML('beforeend', `<div class="members-title">${title} · ${list.length}</div>`);
+    list.forEach((m) => box.appendChild(line(m)));
+  });
+  return box;
 }
 
 async function setRsvp(s, going) {
@@ -215,17 +305,12 @@ loaders.home = async () => {
   document.getElementById('homeKcalNote').textContent = left === null ? '' : left > 0 ? `осталось ${left}` : `перебор ${-left}`;
   const sess = document.getElementById('homeSessions');
   sess.innerHTML = '';
-  if (d.club_sessions) {
-    document.getElementById('homeSessionsTitle').textContent = 'Тренировки клуба';
-    document.getElementById('homeWeek').textContent = 'сегодня и завтра';
-    if (!d.club_sessions.length) sess.innerHTML = '<div class="empty">Занятий нет</div>';
-    d.club_sessions.forEach((r) => sess.appendChild(clubSessionRow(r)));
-  } else {
-    if (!d.sessions.length) sess.innerHTML = '<div class="empty">Тренер ещё не поставил тебе группы</div>';
-    // на главной «буду / не смогу» только на сегодня и завтра, остальное – во вкладке «Клуб»
-    d.sessions.slice(0, 3).forEach((s) => sess.appendChild(sessionRow(s, markAttendance, 2)));
-    document.getElementById('homeWeek').textContent = d.week.total ? `на неделе ${d.week.present} из ${d.week.total}` : '';
-  }
+  const trainerMode = me && me.is_trainer;
+  document.getElementById('homeSessionsTitle').textContent = trainerMode ? 'Тренировки клуба' : 'Тренировки';
+  document.getElementById('homeWeek').textContent = trainerMode ? 'сегодня и завтра'
+    : d.week.total ? `на неделе был ${d.week.present} из ${d.week.total}` : '';
+  if (!d.sessions.length) sess.innerHTML = `<div class="empty">${trainerMode ? 'Занятий нет' : 'Тренер ещё не поставил тебе группы'}</div>`;
+  d.sessions.forEach((r) => sess.appendChild(sessionCard(r, trainerMode)));
   const done = d.goals.filter((g) => g.done).length;
   document.getElementById('homeGoalsCount').textContent = d.goals.length ? `${done} из ${d.goals.length}` : '';
   renderGoals(document.getElementById('homeGoals'), d.goals, async (g) => {
@@ -238,19 +323,6 @@ loaders.home = async () => {
   document.getElementById('homeSleep').textContent = fmt(d.sleep);
   document.getElementById('homeSteps').textContent = d.steps ?? '–';
 };
-
-// Занятие клуба глазами тренера: кто ведёт, сколько придёт, кнопка «Беру»
-function clubSessionRow(r) {
-  const row = document.createElement('div');
-  row.className = `session${r.cancelled ? ' cancelled' : ''}`;
-  const when = r.date === isoDay(new Date()) ? 'Сегодня' : `${r.weekday} ${ddmm(r.date)}`;
-  const lead = r.lead ? `Ведёт ${esc(r.lead.name)}` : '<span class="warn">Никто не взял</span>';
-  row.innerHTML = `<div class="session-time"><b>${esc(r.start)}</b><span>${esc(when)}</span></div>
-    <div class="session-info"><div>${esc(r.group)}</div>
-    <div class="muted small">${esc(r.location)} · ${r.cancelled ? 'отменено' : `${lead} · будут ${r.going} из ${r.members_count}`}</div></div>`;
-  if (!r.cancelled) row.appendChild(leadButton(r, () => refreshCurrent()));
-  return row;
-}
 
 function leadButton(r, after) {
   const mine = r.lead && me && r.lead.id === me.id;
@@ -282,15 +354,21 @@ function gramsPrompt(container, food, onSave) {
   container.querySelectorAll('.grams-box').forEach((el) => el.remove());
   const box = document.createElement('div');
   box.className = 'grams-box';
-  box.innerHTML = `<input type="number" inputmode="decimal" value="${food.portion || 100}"><span class="muted">г</span>
-    <button class="btn-small accent">Записать</button>`;
+  box.innerHTML = `<div class="grams-row"><input type="number" inputmode="decimal" value="${Math.round(food.portion || 100)}"><span class="muted">г</span>
+    <button class="btn-small accent">${food.saveLabel || 'Записать'}</button></div>
+    <div class="grams-quick">${['−50', '+50', '½', '×2'].map((q) => `<button type="button" class="chip small-chip">${q}</button>`).join('')}</div>`;
   const input = box.querySelector('input');
+  box.querySelectorAll('.grams-quick button').forEach((b) => b.addEventListener('click', () => {
+    const v = parseFloat(input.value.replace(',', '.')) || 0;
+    const next = { '−50': v - 50, '+50': v + 50, '½': v / 2, '×2': v * 2 }[b.textContent];
+    input.value = Math.max(5, Math.round(next));
+  }));
   const go = async () => {
     const grams = parseFloat(input.value.replace(',', '.'));
     if (!grams) { toast('Сколько грамм?'); return; }
     await onSave(grams);
   };
-  box.querySelector('button').addEventListener('click', go);
+  box.querySelector('.btn-small').addEventListener('click', go);
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
   return box;
 }
@@ -349,7 +427,7 @@ function mealRow(m) {
   row.querySelector('.grams-btn').addEventListener('click', () => {
     const next = row.nextElementSibling;
     if (next && next.classList.contains('grams-box')) { next.remove(); return; }
-    row.after(gramsPrompt(row.parentElement, { portion: m.grams }, async (grams) => {
+    row.after(gramsPrompt(row.parentElement, { portion: m.grams, saveLabel: 'Сохранить' }, async (grams) => {
       if (await api(`/api/food/meal/${m.id}`, { json: { grams } })) loaders.food();
     }));
   });
@@ -398,7 +476,7 @@ async function loadBase() {
   if (!items) return;
   const list = document.getElementById('baseList');
   list.innerHTML = '';
-  if (!items.length) list.innerHTML = '<div class="empty">Здесь будут твои продукты: с упаковки или те, что ИИ предложит запомнить</div>';
+  if (!items.length) list.innerHTML = '<div class="empty">Твои продукты с упаковки: добавь плюсом или напиши в чат «запомни сырок 407 8.5 27.8 32»</div>';
   items.forEach((f) => {
     const row = document.createElement('div');
     row.className = 'food-item compact';
@@ -512,29 +590,28 @@ document.getElementById('bodySaveBtn').addEventListener('click', async () => {
   loaders.body();
 });
 
-const morningSel = document.getElementById('pMorning');
-for (let h = 5; h <= 12; h += 1) morningSel.insertAdjacentHTML('beforeend', `<option value="${h}">${String(h).padStart(2, '0')}:00</option>`);
-
 async function loadProfile() {
   me = await api('/api/me');
   if (!me) return;
-  document.getElementById('normText').textContent = me.kcal_target
-    ? `Норма ${me.kcal_target} ккал, белок ${me.protein_target} г`
-    : 'Норма появится, когда будут рост, возраст, вес и цель';
-  document.getElementById('pGoal').value = me.goal || 'keep';
-  morningSel.value = me.morning_hour || 10;
+  document.getElementById('pKcal').value = me.kcal_target ?? '';
+  document.getElementById('pProtein').value = me.protein_target ?? '';
   document.getElementById('pAge').value = me.age ?? '';
   document.getElementById('pHeight').value = me.height_cm ?? '';
+  document.getElementById('normText').textContent = !me.kcal_target ? 'Норма появится, когда будут рост, возраст и вес'
+    : me.kcal_manual || me.protein_manual ? 'Норма твоя. Сотри число и сохрани – снова посчитаю по весу, росту и возрасту'
+      : 'Посчитано по весу, росту и возрасту. Можно поставить своё';
 }
 
 document.getElementById('profileSaveBtn').addEventListener('click', async () => {
-  const body = { goal: document.getElementById('pGoal').value, morning_hour: morningSel.value };
-  const age = document.getElementById('pAge').value.trim();
-  const height = document.getElementById('pHeight').value.trim();
-  if (age) body.age = age;
-  if (height) body.height_cm = height;
+  const v = (id) => document.getElementById(id).value.trim();
+  const body = {};
+  if (v('pAge')) body.age = v('pAge');
+  if (v('pHeight')) body.height_cm = v('pHeight');
+  // норму шлём, только если её поменяли руками: иначе она станет «своей»
+  if (v('pKcal') !== String(me.kcal_target ?? '')) body.kcal_target = v('pKcal');
+  if (v('pProtein') !== String(me.protein_target ?? '')) body.protein_target = v('pProtein');
   const r = await api('/api/me', { json: body });
-  if (r) { toast(r.kcal_target ? `Сохранил. Норма ${r.kcal_target} ккал` : 'Сохранил'); loadProfile(); }
+  if (r) { toast(r.kcal_target ? `Сохранил. Норма ${r.kcal_target} ккал, белок ${r.protein_target} г` : 'Сохранил'); loadProfile(); }
 });
 
 // ===== КЛУБ =====
@@ -546,14 +623,24 @@ loaders.club = async () => {
   if (!d.groups.length) gl.innerHTML = '<div class="empty">Групп пока нет. Тренер поставит их по твоему абонементу – бот сразу напишет.</div>';
   d.groups.forEach((g) => {
     gl.insertAdjacentHTML('beforeend', `<div class="group-card"><div class="group-name">${esc(g.name)}</div>
-      <div class="muted small">${esc(g.days_text)}, ${esc(g.start)}–${esc(g.end)}</div>
-      <div class="muted small">${esc(g.location)}${g.address ? ` · ${esc(g.address)}` : ''}</div></div>`);
+      <div class="muted small">${esc(g.location)} · ${esc(g.days_text)}, ${esc(g.start)}–${esc(g.end)}</div></div>`);
   });
   document.getElementById('clubStats').textContent = d.stats.percent !== null ? `посещаемость ${d.stats.percent}%` : '';
-  const up = document.getElementById('upcomingList');
-  up.innerHTML = '';
-  if (!d.upcoming.length) up.innerHTML = '<div class="empty">Ближайших занятий нет</div>';
-  d.upcoming.forEach((s) => up.appendChild(sessionRow(s, markAttendance)));
+  const hl0 = document.getElementById('hallList');
+  hl0.innerHTML = '';
+  d.locations.forEach((l) => {
+    const row = document.createElement('div');
+    row.className = 'hall';
+    row.innerHTML = `<div class="hall-main"><div class="group-name">${esc(l.name)}</div><div class="muted small">${esc(l.address || 'адрес не указан')}</div></div>`;
+    if (l.address) {
+      const b = document.createElement('button');
+      b.className = 'btn-small';
+      b.textContent = 'Маршрут';
+      b.addEventListener('click', () => openLink(`https://yandex.ru/maps/?text=${encodeURIComponent(`Москва, ${l.address}`)}`));
+      row.appendChild(b);
+    }
+    hl0.appendChild(row);
+  });
   const hl = document.getElementById('historyList');
   hl.innerHTML = '';
   if (!d.history.length) hl.innerHTML = '<div class="empty">Здесь появятся прошедшие занятия</div>';
@@ -564,6 +651,11 @@ loaders.club = async () => {
     if (await api('/api/club/attendance', { json: body })) loaders.club();
   })));
 };
+
+function openLink(url) {
+  try { if (tg && tg.openLink) { tg.openLink(url); return; } } catch (e) { /* ниже обычным окном */ }
+  window.open(url, '_blank');
+}
 
 function historyRow(h, trainerMode, onSet) {
   const row = document.createElement('div');
@@ -726,7 +818,7 @@ loaders.trainer = async () => {
   reg.textContent = d.registering.length ? `Проходят анкету: ${d.registering.map((x) => x.name).join(', ')}` : '';
   const tb = document.getElementById('trainersBox');
   tb.classList.toggle('hidden', !d.trainers.length);
-  tb.textContent = `Тренеры: ${d.trainers.map((x) => x.name).join(', ')}`;
+  tb.innerHTML = `<span>Тренеры:</span> ${d.trainers.map((x) => `<span class="person">${avatarHtml(x.name, x.avatar, 22)}${esc(x.name)}</span>`).join(' ')}`;
   renderGroups();
   const ll = document.getElementById('locList');
   ll.innerHTML = d.locations.map((l) => `<div class="loc-row"><b>${esc(l.name)}</b> <span class="muted small">${esc(l.address || '')}</span></div>`).join('');
@@ -744,16 +836,16 @@ function ago(iso) {
 
 function renderAthletes() {
   if (!trainerData) return;
-  const q = document.getElementById('athleteSearch').value.trim().toLowerCase();
+  const q = document.getElementById('athleteSearch').value.trim();
   const list = document.getElementById('athleteList');
-  const items = trainerData.athletes.filter((a) => !q || a.name.toLowerCase().includes(q));
+  const items = trainerData.athletes.filter((a) => nameMatches(a.name, q));
   document.getElementById('athleteCount').textContent = `${trainerData.athletes.length}`;
   list.innerHTML = '';
-  if (!items.length) list.innerHTML = '<div class="empty">Пока никого. Отправь ссылку-приглашение выше.</div>';
+  if (!items.length) list.innerHTML = `<div class="empty">${q ? 'Никого не нашёл' : 'Пока никого. Отправь ссылку-приглашение выше.'}</div>`;
   items.forEach((a) => {
     const row = document.createElement('div');
     row.className = 'athlete-row tap';
-    row.innerHTML = `<div class="avatar">${esc(a.name.slice(0, 1).toUpperCase())}</div>
+    row.innerHTML = `${avatarHtml(a.name, a.avatar)}
       <div class="athlete-main"><div>${esc(a.name)}</div>
       <div class="muted small">${a.groups.length ? esc(a.groups.join(', ')) : '<span class="warn">группы не назначены</span>'}</div>
       <div class="muted small">${ago(a.last_seen)}${a.attendance !== null ? ` · посещаемость ${a.attendance}%` : ''}${a.weight ? ` · ${fmt(a.weight)} кг` : ''}</div></div>
@@ -773,9 +865,8 @@ async function openAthlete(id) {
   if (!a) return;
   document.getElementById('sheet').classList.remove('hidden');
   document.body.classList.add('locked');
-  document.getElementById('sheetTitle').textContent = a.name;
-  const goalText = { gain: 'набор', cut: 'сушка', keep: 'поддержание' }[a.goal] || '';
-  document.getElementById('sheetSub').textContent = [a.age && `${a.age} лет`, a.height_cm && `${a.height_cm} см`, goalText].filter(Boolean).join(' · ');
+  document.getElementById('sheetTitle').innerHTML = `${avatarHtml(a.name, a.avatar, 44)}<span>${esc(a.name)}</span>`;
+  document.getElementById('sheetSub').textContent = [a.age && `${a.age} лет`, a.height_cm && `${a.height_cm} см`].filter(Boolean).join(' · ');
   const body = document.getElementById('sheetBody');
   const s = a.summary;
   body.innerHTML = `
@@ -932,34 +1023,7 @@ async function rosterView(g, row) {
       });
       actions.appendChild(c);
     }
-    if (!r.cancelled) {
-      if (!r.members.length) sec.insertAdjacentHTML('beforeend', '<div class="empty">В группе никого</div>');
-      r.members.forEach((m) => {
-        const line = document.createElement('div');
-        line.className = 'member';
-        line.innerHTML = `<span>${esc(m.name)}</span>`;
-        if (r.started) {
-          const chips = document.createElement('span');
-          chips.className = 'chips';
-          [['Был', true], ['Не был', false]].forEach(([label, val]) => {
-            const b = document.createElement('button');
-            b.className = `chip small-chip${m.present === val ? ' active' : ''}`;
-            b.textContent = label;
-            b.addEventListener('click', async () => {
-              const res = await api(`/api/trainer/athlete/${m.id}/attendance`,
-                { json: { group_id: r.group_id, date: r.date, present: m.present === val ? null : val } });
-              if (res) reload();
-            });
-            chips.appendChild(b);
-          });
-          line.appendChild(chips);
-        } else {
-          line.insertAdjacentHTML('beforeend', m.going === true ? '<span class="tag tag-green">будет</span>'
-            : m.going === false ? '<span class="tag tag-red">не сможет</span>' : '<span class="tag">не ответил</span>');
-        }
-        sec.appendChild(line);
-      });
-    }
+    if (!r.cancelled) sec.appendChild(membersBlock(r, true, reload));
     box.appendChild(sec);
   });
   return box;
@@ -981,6 +1045,7 @@ document.getElementById('locAddBtn').addEventListener('click', async () => {
   me = await api('/api/me');
   if (!me) return;
   document.getElementById('helloName').textContent = me.name ? `Привет, ${me.name}` : 'Привет';
+  document.getElementById('helloAvatar').innerHTML = avatarHtml(me.name, me.avatar, 42);
   document.getElementById('helloSub').textContent = me.club || '';
   if (me.is_trainer) {
     // тренеру своя вкладка вместо «Клуба»: группы ему не ставятся

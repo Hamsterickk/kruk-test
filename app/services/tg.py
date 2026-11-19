@@ -58,3 +58,33 @@ def send(tg_id: int, text: str, markup: dict | None = None, markdown: bool = Tru
     except requests.RequestException:
         logger.warning('Телеграм недоступен', exc_info=True)
         return False
+
+
+def fetch_avatar(tg_id: int) -> tuple[str, bytes] | None:
+    """Аватарка из профиля телеграма: (file_unique_id, jpg). ('', b'') – аватарки нет или она скрыта.
+    None – телеграм не ответил, попробуем позже."""
+    token = current_app.config.get('TELEGRAM_BOT_TOKEN')
+    if not token:
+        return None
+    base = f'https://api.telegram.org/bot{token}'
+    try:
+        r = requests.get(f'{base}/getUserProfilePhotos', params={'user_id': tg_id, 'limit': 1}, timeout=8)
+        if r.status_code != 200:
+            return None
+        photos = r.json().get('result', {}).get('photos') or []
+        if not photos:
+            return '', b''
+        # самый маленький размер не меньше 160 px – для кружка хватает
+        sizes = sorted(photos[0], key=lambda p: p.get('width', 0))
+        size = next((p for p in sizes if p.get('width', 0) >= 160), sizes[-1])
+        r = requests.get(f'{base}/getFile', params={'file_id': size['file_id']}, timeout=8)
+        path = r.json().get('result', {}).get('file_path') if r.status_code == 200 else None
+        if not path:
+            return None
+        r = requests.get(f'https://api.telegram.org/file/bot{token}/{path}', timeout=15)
+        if r.status_code != 200 or len(r.content) > 2_000_000:
+            return None
+        return size.get('file_unique_id', 'x'), r.content
+    except (requests.RequestException, ValueError, KeyError):
+        logger.warning('Не получилось скачать аватарку %s', tg_id, exc_info=True)
+        return None

@@ -7,7 +7,7 @@ from flask import Blueprint, jsonify, request, g, current_app
 
 from app.auth import trainer_required
 from app.models import db, User, Club, Group, Location, Membership, SessionCancel, Goal, ADMIN, ATHLETE
-from app.services import club, goals, body, foods, reminders
+from app.services import club, goals, body, foods, reminders, avatars
 
 bp = Blueprint('trainer', __name__)
 TIME_RE = re.compile(r'^([01]\d|2[0-3]):[0-5]\d$')
@@ -39,7 +39,7 @@ def overview():
             continue
         stats = club.attendance_stats(u.id, 30)
         s = body.summary(u.id)
-        athletes.append({'id': u.id, 'name': u.name or u.username or str(u.tg_id), 'role': u.role,
+        athletes.append({'id': u.id, 'name': u.name or u.username or str(u.tg_id), 'role': u.role, 'avatar': avatars.url(u),
                          'groups': [x.name for x in club.user_groups(u.id)], 'attendance': stats['percent'],
                          'weight': s['weight'], 'weight_change': s['weight_change'],
                          'last_seen': u.last_seen_at.isoformat() if u.last_seen_at else None})
@@ -49,7 +49,7 @@ def overview():
         'club': c.name, 'athlete_link': _link(c.join_code),
         'trainer_link': _link(c.trainer_code) if g.user.role == ADMIN else None,
         'athletes': athletes, 'registering': pending, 'me': g.user.id,
-        'trainers': [{'id': u.id, 'name': u.name} for u in people if u.role != ATHLETE and u.onboarding_step is None],
+        'trainers': [{'id': u.id, 'name': u.name, 'avatar': avatars.url(u)} for u in people if u.role != ATHLETE],
         'groups': [{**club.group_json(x), 'members': len(club.group_members(x.id))} for x in groups],
         'locations': [{'id': l.id, 'name': l.name, 'address': l.address}
                       for l in Location.query.filter_by(club_id=c.id).order_by(Location.id).all()],
@@ -65,7 +65,8 @@ def athlete_card(user_id):
     s = body.summary(u.id)
     weights = [d for d in body.week(u.id, 0) + body.week(u.id, 1) if d['weight']]
     return jsonify({
-        'id': u.id, 'name': u.name, 'role': u.role, 'age': u.age, 'height_cm': u.height_cm,
+        'id': u.id, 'name': u.name, 'role': u.role, 'age': u.age, 'height_cm': u.height_cm, 'avatar': avatars.url(u),
+        'kcal_manual': bool(u.kcal_manual),
         'goal': u.goal, 'kcal_target': u.kcal_target,
         'group_ids': [x.id for x in club.user_groups(u.id)],
         'history': club.history(u.id, 30), 'stats': club.attendance_stats(u.id, 30),
@@ -238,8 +239,8 @@ def group_lead(group_id):
         if not ok:
             return jsonify({'error': f'Уже ведёт {who}'}), 409
         reminders.notify_lead_taken(g.user, grp, day)
-    else:
-        club.release_lead(grp.id, day, g.user.id)
+    elif club.release_lead(grp.id, day, g.user.id):
+        reminders.notify_lead_released(g.user, grp, day)
     return jsonify(club.roster(grp, day))
 
 

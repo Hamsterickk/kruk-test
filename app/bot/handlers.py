@@ -9,8 +9,8 @@ from telegram.constants import ChatAction, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-from app.models import db, User, Club, Message, AiUsage, ATHLETE, TRAINER, ADMIN
-from app.services import chat, profile, goals, reminders
+from app.models import db, User, Club, Message, AiUsage, Goal, ATHLETE, TRAINER, ADMIN
+from app.services import chat, profile, goals, reminders, club
 from app.services.tg import md_to_html, send
 
 logger = logging.getLogger(__name__)
@@ -67,8 +67,6 @@ def question(user_id: int) -> tuple[str, list]:
         rows = [[(f"Оставить: {u.name}"[:40], 'ob:name_keep')]]
     elif step == 'sex':
         rows = [[('Мужской', 'ob:sex:m'), ('Женский', 'ob:sex:f')]]
-    elif step == 'goal':
-        rows = [[(v, f"ob:goal:{k}")] for k, v in profile.GOALS.items()]
     if u.is_trainer:
         rows.append([('Пропустить анкету', 'ob:skip')])
     n = profile.STEPS.index(step) + 1
@@ -149,7 +147,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state['step']:
         if res['status'] == 'new':
             await _reply(update, 'Привет! Это тестовый бот Kruk Team: питание, вес, сон, шаги, цели и тренировки клуба. '
-                                 'Сначала короткая анкета – 6 вопросов, по ней посчитаю норму калорий.')
+                                 'Сначала короткая анкета – 5 вопросов, по ней посчитаю норму калорий.')
         text, rows = await run(question, state['id'])
         await _reply(update, text, _kb(rows))
         return
@@ -188,9 +186,27 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
         await _after_answer(update, state['id'])
         return
-    await context.bot.send_chat_action(update.effective_chat.id, ChatAction.TYPING)
-    out = await run(_handle, state['id'], text)
+    stop = asyncio.Event()
+    typing = asyncio.create_task(_typing(context.bot, update.effective_chat.id, stop))
+    try:
+        out = await run(_handle, state['id'], text)
+    finally:
+        stop.set()
+        await typing
     await _reply(update, out['text'], _markup_from_dict(out.get('markup')))
+
+
+async def _typing(bot, chat_id: int, stop: asyncio.Event):
+    """«печатает…» держится 5 секунд – обновляем, пока ИИ думает."""
+    while not stop.is_set():
+        try:
+            await bot.send_chat_action(chat_id, ChatAction.TYPING)
+        except Exception:
+            pass
+        try:
+            await asyncio.wait_for(stop.wait(), 4.5)
+        except asyncio.TimeoutError:
+            pass
 
 
 def _handle(user_id: int, text: str) -> dict:
@@ -204,14 +220,36 @@ async def on_other(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await _reply(update, 'Я понимаю только текст. Напиши словами, что съел или что нужно.')
 
 
-def _callback(user_id: int, data: str) -> dict:
+def _callback(user_id: int, data: str, rows: list) -> dict:
     u = db.session.get(User, user_id)
     out = {'text': chat.callback(u, data)}
-    if data.startswith('goal:'):
-        g = goals.as_json(u.id)
-        out['rows'] = [[(('✅ ' if x['done'] else '▫️ ') + x['title'][:40], f"goal:{x['id']}")] for x in g]
+    if data.split(':')[0] in ('goal', 'rsvp') and rows:
+        out['rows'] = refresh_rows(u, rows)  # кнопки остаются, на них видно, что выбрано
     else:
         chat.save(u.id, 'assistant', out['text'])
+    return out
+
+
+def refresh_rows(u: User, rows: list) -> list:
+    """Те же кнопки сообщения с новыми подписями: цели – ✅, «буду / не смогу» – выбранное."""
+    out = []
+    for row in rows:
+        new = []
+        for text, data in row:
+            kind, _, rest = data.partition(':')
+            if kind == 'goal':
+                g = Goal.query.filter_by(id=int(rest or 0), user_id=u.id, is_active=True).first()
+                if not g:
+                    continue
+                text = ('✅ ' if g.id in goals.done_ids([g.id]) else '▫️ ') + g.title[:40]
+            elif kind == 'rsvp':
+                gid, day, val = rest.split(':')
+                day = date.fromisoformat(day)
+                cur = club.rsvp_map(u.id, day, day).get((int(gid), day))
+                text = reminders.rsvp_row(int(gid), day, cur)[0 if val == '1' else 1][0]
+            new.append((text, data))
+        if new:
+            out.append(new)
     return out
 
 
@@ -235,8 +273,6 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 value = await run(lambda: db.session.get(User, state['id']).name)
             elif data.startswith('ob:sex:'):
                 value = data.split(':')[2]
-            elif data.startswith('ob:goal:'):
-                value = data.split(':')[2]
             err = await run(_answer, state['id'], value or '')
             if err:
                 await _reply(update, err)
@@ -250,7 +286,9 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state['step']:
         await q.answer('Сначала закончи анкету')
         return
-    out = await run(_callback, state['id'], data)
+    rows = [[(b.text, b.callback_data) for b in row if b.callback_data]
+            for row in (q.message.reply_markup.inline_keyboard if q.message and q.message.reply_markup else [])]
+    out = await run(_callback, state['id'], data, rows)
     if 'rows' in out:
         await q.answer(out['text'][:190])
         try:
