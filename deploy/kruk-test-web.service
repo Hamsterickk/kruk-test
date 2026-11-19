@@ -1,0 +1,16 @@
+[Unit]
+Description=Kruk Team test – mini app
+After=network.target postgresql.service
+
+[Service]
+WorkingDirectory=/var/www/kruk-test
+ExecStart=/var/www/kruk-test/.venv/bin/gunicorn --workers 1 --threads 4 --timeout 60 --bind 127.0.0.1:5020 run:app
+Restart=always
+RestartSec=5
+# жёсткие рамки: тест не может отъесть память и процессор у сайта и личного бота
+MemoryMax=350M
+CPUQuota=60%
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

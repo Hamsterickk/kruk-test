@@ -1,0 +1,15 @@
+[Unit]
+Description=Kruk Team test – telegram bot
+After=network.target postgresql.service
+
+[Service]
+WorkingDirectory=/var/www/kruk-test
+ExecStart=/var/www/kruk-test/.venv/bin/python bot_run.py
+Restart=always
+RestartSec=5
+MemoryMax=300M
+CPUQuota=60%
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

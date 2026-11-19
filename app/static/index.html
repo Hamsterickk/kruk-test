@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Kruk Team тест</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/bebas-neue@5.0.20/index.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/400.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/600.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource/montserrat@5.0.20/700.css">
+  <link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+  <div id="gate" class="gate hidden">
+    <div class="gate-box">
+      <div class="gate-logo">KRUK TEAM</div>
+      <p id="gateText"></p>
+    </div>
+  </div>
+
+  <main id="screens">
+
+    <!-- СЕГОДНЯ -->
+    <section id="screen-home" class="screen active">
+      <div class="hello">
+        <div><div class="hello-name" id="helloName">Привет</div><div class="hello-sub" id="helloSub"></div></div>
+        <span class="badge">тест</span>
+      </div>
+
+      <div class="widget">
+        <div class="widget-row"><h3>Питание сегодня</h3><span class="muted small" id="homeKcalNote"></span></div>
+        <div class="kcal-line"><span class="kcal-big" id="homeKcal">0</span><span class="muted" id="homeKcalOf"></span></div>
+        <div class="bar"><div class="bar-fill" id="homeKcalBar"></div></div>
+        <div class="macro-row" id="homeMacros"></div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-row"><h3>Тренировки</h3><span class="muted small" id="homeWeek"></span></div>
+        <div id="homeSessions"></div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-row"><h3>Цели дня</h3><span class="muted small" id="homeGoalsCount"></span></div>
+        <div id="homeGoals"></div>
+        <div class="inline-form">
+          <input type="text" id="goalInput" placeholder="Новая цель, например «2 литра воды»" maxlength="200">
+          <button class="btn-plus" id="goalAddBtn" aria-label="Добавить цель">+</button>
+        </div>
+        <label class="switch-row"><input type="checkbox" id="goalDaily" checked> <span>Каждый день</span></label>
+      </div>
+
+      <div class="widget tap" id="homeBody">
+        <div class="widget-row"><h3>Вес, сон, шаги</h3><span class="chevron">›</span></div>
+        <div class="trio">
+          <div><span class="trio-num" id="homeWeight">–</span><span class="trio-label">вес, кг</span></div>
+          <div><span class="trio-num" id="homeSleep">–</span><span class="trio-label">сон, ч</span></div>
+          <div><span class="trio-num" id="homeSteps">–</span><span class="trio-label">шаги</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ЕДА -->
+    <section id="screen-food" class="screen">
+      <div class="widget">
+        <div class="widget-row"><h3>Сегодня</h3><span class="muted small" id="foodNorm"></span></div>
+        <div class="kcal-line"><span class="kcal-big" id="foodKcal">0</span><span class="muted" id="foodKcalOf"></span></div>
+        <div class="bar"><div class="bar-fill" id="foodKcalBar"></div></div>
+        <div class="macro-row" id="foodMacros"></div>
+      </div>
+
+      <div class="widget">
+        <h3>Найти и записать</h3>
+        <input type="text" id="foodSearch" placeholder="Гречка, курица, банан…" autocomplete="off">
+        <div id="foodResults"></div>
+      </div>
+
+      <div class="widget hidden" id="yesterdayWidget">
+        <div class="widget-row"><h3>Как вчера</h3><button class="btn-small" id="repeatAllBtn">Повторить всё</button></div>
+        <div id="yesterdayList"></div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-row"><h3>Записано</h3><span class="muted small">тап по весу – поправить</span></div>
+        <div id="mealsList"></div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-row tap" id="baseToggle"><h3>Моя база</h3>
+          <div class="row-tools"><button class="btn-plus" id="baseAddBtn" aria-label="Добавить продукт">+</button><span class="chevron">›</span></div>
+        </div>
+        <div id="baseBody" class="hidden">
+          <div id="baseForm" class="base-form hidden">
+            <input type="text" id="baseName" placeholder="Название" maxlength="120">
+            <div class="grid4">
+              <input type="number" id="baseKcal" placeholder="ккал" inputmode="decimal">
+              <input type="number" id="baseP" placeholder="Б" inputmode="decimal">
+              <input type="number" id="baseF" placeholder="Ж" inputmode="decimal">
+              <input type="number" id="baseC" placeholder="У" inputmode="decimal">
+            </div>
+            <input type="number" id="basePortion" placeholder="Обычная порция, г – необязательно" inputmode="decimal">
+            <button class="btn btn-accent" id="baseSaveBtn">Сохранить в базу</button>
+            <div class="hint">КБЖУ на 100 г – смотри на упаковке</div>
+          </div>
+          <div id="baseList"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ТЕЛО -->
+    <section id="screen-body" class="screen">
+      <div class="week-nav">
+        <button class="icon-btn" id="weekPrev" aria-label="Прошлая неделя"></button>
+        <span id="weekLabel">Эта неделя</span>
+        <button class="icon-btn" id="weekNext" aria-label="Следующая неделя"></button>
+      </div>
+      <div class="widget"><div class="widget-row"><h3>Вес, кг</h3><span class="muted small" id="weightNote"></span></div><div class="bars" id="weightBars"></div></div>
+      <div class="widget"><div class="widget-row"><h3>Сон, ч</h3><span class="muted small" id="sleepNote"></span></div><div class="bars" id="sleepBars"></div></div>
+      <div class="widget"><div class="widget-row"><h3>Шаги</h3><span class="muted small" id="stepsNote"></span></div><div class="bars" id="stepsBars"></div></div>
+
+      <div class="widget">
+        <h3 id="bodyFormTitle">Записать за сегодня</h3>
+        <div class="hint">Тап по дню на графике – записать или поправить задним числом</div>
+        <div class="grid3">
+          <input type="number" id="inWeight" placeholder="Вес" inputmode="decimal">
+          <input type="number" id="inSleep" placeholder="Сон" inputmode="decimal">
+          <input type="text" id="inSteps" placeholder="Шаги" inputmode="numeric">
+        </div>
+        <button class="btn btn-accent" id="bodySaveBtn">Сохранить</button>
+      </div>
+
+      <div class="widget">
+        <h3>Профиль и норма</h3>
+        <div class="muted small" id="normText"></div>
+        <div class="grid2">
+          <label class="field">Цель<select id="pGoal"><option value="gain">Набор массы</option><option value="keep">Поддержание</option><option value="cut">Сушка</option></select></label>
+          <label class="field">Утро в<select id="pMorning"></select></label>
+          <label class="field">Возраст<input type="number" id="pAge" inputmode="numeric"></label>
+          <label class="field">Рост, см<input type="number" id="pHeight" inputmode="numeric"></label>
+        </div>
+        <button class="btn btn-ghost" id="profileSaveBtn">Сохранить профиль</button>
+      </div>
+    </section>
+
+    <!-- КЛУБ -->
+    <section id="screen-club" class="screen">
+      <div class="widget">
+        <div class="widget-row"><h3>Мои группы</h3><span class="muted small" id="clubStats"></span></div>
+        <div id="myGroups"></div>
+      </div>
+      <div class="widget">
+        <h3>Ближайшие занятия</h3>
+        <div id="upcomingList"></div>
+      </div>
+      <div class="widget">
+        <div class="widget-row"><h3>Дневник посещений</h3><span class="muted small">30 дней</span></div>
+        <div id="historyList"></div>
+      </div>
+    </section>
+
+    <!-- ЧАТ -->
+    <section id="screen-chat" class="screen">
+      <div class="chat-wrap">
+        <div class="chat-messages" id="chatMessages"></div>
+        <button class="scroll-down hidden" id="scrollDownBtn" aria-label="Вниз"></button>
+        <div class="chat-input-row">
+          <textarea id="chatInput" rows="1" placeholder="Что съел, вес, сон, шаги…"></textarea>
+          <button class="send-btn" id="chatSendBtn" aria-label="Отправить"></button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ТРЕНЕР -->
+    <section id="screen-trainer" class="screen">
+      <div class="widget">
+        <h3>Пригласить в клуб</h3>
+        <div class="link-row"><span class="link-text" id="athleteLink"></span><button class="icon-btn" id="copyAthleteLink" aria-label="Скопировать"></button></div>
+        <div class="hint">Отправь эту ссылку спортсмену. Детей не добавляем.</div>
+        <div id="trainerLinkBox" class="hidden">
+          <div class="link-row"><span class="link-text" id="trainerLink"></span><button class="icon-btn" id="copyTrainerLink" aria-label="Скопировать"></button></div>
+          <div class="hint">Ссылка для тренеров – видишь только ты</div>
+        </div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-row"><h3>Спортсмены</h3><span class="muted small" id="athleteCount"></span></div>
+        <input type="text" id="athleteSearch" placeholder="Поиск по имени">
+        <div id="athleteList"></div>
+        <div id="registeringBox" class="hint hidden"></div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-row"><h3>Группы и расписание</h3><button class="btn-plus" id="groupAddBtn" aria-label="Новая группа">+</button></div>
+        <div id="groupForm" class="hidden"></div>
+        <div id="groupList"></div>
+      </div>
+
+      <div class="widget">
+        <div class="widget-row tap" id="locToggle"><h3>Залы</h3><span class="chevron">›</span></div>
+        <div id="locBody" class="hidden">
+          <div id="locList"></div>
+          <input type="text" id="locName" placeholder="Название зала">
+          <input type="text" id="locAddress" placeholder="Адрес">
+          <button class="btn btn-ghost" id="locAddBtn">Добавить зал</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Карточка спортсмена для тренера -->
+  <div id="sheet" class="sheet hidden">
+    <div class="sheet-box">
+      <div class="sheet-head">
+        <div><div class="sheet-title" id="sheetTitle"></div><div class="muted small" id="sheetSub"></div></div>
+        <button class="icon-btn" id="sheetClose" aria-label="Закрыть"></button>
+      </div>
+      <div id="sheetBody"></div>
+    </div>
+  </div>
+
+  <nav id="bottomNav">
+    <button class="nav-btn active" data-screen="home"><span class="nav-ico" data-icon="home"></span>Сегодня</button>
+    <button class="nav-btn" data-screen="food"><span class="nav-ico" data-icon="food"></span>Еда</button>
+    <button class="nav-btn" data-screen="body"><span class="nav-ico" data-icon="body"></span>Тело</button>
+    <button class="nav-btn" data-screen="club"><span class="nav-ico" data-icon="club"></span>Клуб</button>
+    <button class="nav-btn" data-screen="chat"><span class="nav-ico" data-icon="chat"></span>Чат</button>
+    <button class="nav-btn hidden" data-screen="trainer" id="navTrainer"><span class="nav-ico" data-icon="trainer"></span>Тренер</button>
+  </nav>
+
+  <div id="confirmOverlay" class="confirm-overlay hidden">
+    <div class="confirm-box">
+      <p id="confirmText"></p>
+      <div class="confirm-actions">
+        <button id="confirmCancel" class="btn btn-ghost">Отмена</button>
+        <button id="confirmOk" class="btn btn-accent">Да</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast"></div>
+  <script src="main.js?v=1"></script>
+</body>
+</html>
